@@ -1,0 +1,6 @@
+{
+  "name": "AeroTrainer 3D - Simulador de Drone",
+  "description": "Simulador realista de voo de drone em mundo aberto com missões de treinamento para iniciantes e controle virtual via celular.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
