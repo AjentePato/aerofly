@@ -100,7 +100,7 @@ export function TitleOverlay({
                   key={m.id}
                   type="button"
                   onClick={() => onSelectMission(m.id)}
-                  className={`w-full text-left px-3.5 py-2.5 rounded-lg border transition-colors flex items-center justify-between gap-3 ${
+                  className={`w-full text-left px-3.5 py-2 rounded-lg border transition-colors flex items-center justify-between gap-3 ${
                     active
                       ? 'bg-amber-500/20 border-amber-400 text-white'
                       : 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:border-slate-500 hover:text-white'

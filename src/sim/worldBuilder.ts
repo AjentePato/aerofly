@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { ELEVATED_PAD, MAIN_HELIPAD, RADIO_TOWER, groundHeightAt } from './physics';
+import { ELEVATED_PAD, LAKE_AREA, MAIN_HELIPAD, RADIO_TOWER, WIND_TURBINES, getWorldTrees, groundHeightAt } from './physics';
+import { ROAD_SEGMENTS, buildWorldStructures, distToSegment2D, type StructureMaterialKey } from './structures';
 import type { GatePoint, MissionDefinition, MissionProgress } from './types';
 
 export interface GateVisual {
@@ -20,6 +21,8 @@ export interface WorldHandles {
   gateVisuals: GateVisual[];
   losAnchor: THREE.Vector3;
   sunLight: THREE.DirectionalLight;
+  sunDirection: THREE.Vector3;
+  environmentColliders: THREE.Object3D[];
   updateMissionVisuals: (mission: MissionDefinition, progress: MissionProgress, elapsed: number) => void;
   dispose: () => void;
 }
@@ -97,6 +100,50 @@ function createTerrainDetailTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+function createMasonryBumpTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, 256, 256);
+
+  // Subtle weathered brick/concrete courses + pitting
+  ctx.fillStyle = '#686868';
+  for (let y = 0; y < 256; y += 32) {
+    ctx.fillRect(0, y, 256, 3);
+    const offset = (y / 32) % 2 === 0 ? 0 : 32;
+    for (let x = offset; x < 256; x += 64) {
+      ctx.fillRect(x, y, 3, 32);
+    }
+  }
+  for (let i = 0; i < 1800; i++) {
+    const x = (i * 97) % 256;
+    const y = (i * 53 + Math.floor(i / 64) * 19) % 256;
+    const v = 96 + ((i * 29) % 64);
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.fillRect(x, y, 2, 2);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(2, 2);
+  return tex;
+}
+
+function distToSegment(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
+  const vx = bx - ax;
+  const vz = bz - az;
+  const wx = px - ax;
+  const wz = pz - az;
+  const c1 = vx * wx + vz * wz;
+  if (c1 <= 0) return Math.hypot(px - ax, pz - az);
+  const c2 = vx * vx + vz * vz;
+  if (c2 <= c1) return Math.hypot(px - bx, pz - bz);
+  const t = c1 / c2;
+  return Math.hypot(px - (ax + t * vx), pz - (az + t * vz));
+}
+
 export function buildTrainingWorld(
   scene: THREE.Scene,
   renderer: THREE.WebGLRenderer,
@@ -111,7 +158,7 @@ export function buildTrainingWorld(
   pmremGenerator.dispose();
 
   const sky = new Sky();
-  sky.scale.setScalar(4500);
+  sky.scale.setScalar(6500);
   scene.add(sky);
 
   const skyUniforms = sky.material.uniforms;
@@ -126,38 +173,39 @@ export function buildTrainingWorld(
   sunVec.setFromSphericalCoords(1, phi, theta);
   skyUniforms['sunPosition'].value.copy(sunVec);
 
-  scene.fog = new THREE.FogExp2(0xc7d9e8, 0.0036);
+  scene.fog = new THREE.FogExp2(0xc7d9e8, 0.0017);
 
   // 2. Warm/Cool 3-Point Outdoor Lighting Rig
   const hemiLight = new THREE.HemisphereLight(0x9ed0ff, 0x3b4d34, 0.95);
-  hemiLight.position.set(0, 60, 0);
+  hemiLight.position.set(0, 80, 0);
   scene.add(hemiLight);
 
   const sunLight = new THREE.DirectionalLight(0xfff1d6, 2.5);
-  sunLight.position.copy(sunVec).multiplyScalar(110);
+  sunLight.position.copy(sunVec).multiplyScalar(140);
   sunLight.castShadow = !isSoftwareGl;
   if (!isSoftwareGl) {
     sunLight.shadow.mapSize.width = 2048;
     sunLight.shadow.mapSize.height = 2048;
-    const d = 85;
+    const d = 115;
     sunLight.shadow.camera.left = -d;
     sunLight.shadow.camera.right = d;
     sunLight.shadow.camera.top = d;
     sunLight.shadow.camera.bottom = -d;
     sunLight.shadow.camera.near = 10;
-    sunLight.shadow.camera.far = 250;
+    sunLight.shadow.camera.far = 340;
     sunLight.shadow.bias = -0.0005;
     sunLight.shadow.normalBias = 0.02;
   }
   scene.add(sunLight);
+  scene.add(sunLight.target);
 
   const rimLight = new THREE.DirectionalLight(0xbfe0ff, 0.55);
-  rimLight.position.set(-70, 35, 80);
+  rimLight.position.set(-120, 45, 110);
   scene.add(rimLight);
 
-  // 3. Open-World Procedural Terrain
-  const terrainSize = 360;
-  const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, 112, 112);
+  // 3. Open-World Procedural Terrain (1360m x 1360m expansive valley + continuous mountain horizon)
+  const terrainSize = 1360;
+  const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, 200, 200);
   terrainGeo.rotateX(-Math.PI / 2);
 
   const posAttr = terrainGeo.attributes.position;
@@ -165,8 +213,11 @@ export function buildTrainingWorld(
   const cGrass = new THREE.Color(0x466d3b);
   const cAirfield = new THREE.Color(0x4d7740);
   const cSand = new THREE.Color(0x9a8f6f);
+  const cTrail = new THREE.Color(0x7c7158);
   const cRock = new THREE.Color(0x5e6770);
   const tmpColor = new THREE.Color();
+
+  const roadSegments = ROAD_SEGMENTS;
 
   for (let i = 0; i < posAttr.count; i++) {
     const x = posAttr.getX(i);
@@ -177,15 +228,29 @@ export function buildTrainingWorld(
     const r = Math.hypot(x, z);
     if (y < -0.6) {
       tmpColor.copy(cSand);
-    } else if (y > 9.5) {
-      const rockMix = Math.min(1, (y - 9.5) / 10);
+    } else if (y > 12.0) {
+      const rockMix = Math.min(1, (y - 12.0) / 14);
       tmpColor.copy(cGrass).lerp(cRock, rockMix);
-    } else if (r < 34) {
+    } else if (r < 48) {
       tmpColor.copy(cAirfield);
     } else {
-      const n = 0.5 + 0.5 * Math.sin(x * 0.08 + z * 0.06);
+      const n = 0.5 + 0.5 * Math.sin(x * 0.055 + z * 0.045);
       tmpColor.copy(cAirfield).lerp(cGrass, n * 0.85);
     }
+
+    // Blend subtle dirt access trails connecting zones (zero Z-fighting!)
+    if (r > 12 && y > -0.4 && y < 12) {
+      let minRoad = 999;
+      for (const [ax, az, bx, bz] of roadSegments) {
+        const d = distToSegment2D(x, z, ax, az, bx, bz);
+        if (d < minRoad) minRoad = d;
+      }
+      if (minRoad < 4.5) {
+        const blend = Math.max(0, 1 - minRoad / 4.5) * 0.72;
+        tmpColor.lerp(cTrail, blend);
+      }
+    }
+
     colors[i * 3] = tmpColor.r;
     colors[i * 3 + 1] = tmpColor.g;
     colors[i * 3 + 2] = tmpColor.b;
@@ -194,6 +259,7 @@ export function buildTrainingWorld(
   terrainGeo.computeVertexNormals();
 
   const terrainBump = createTerrainDetailTexture();
+  terrainBump.repeat.set(90, 90);
   terrainBump.anisotropy = maxAniso;
   const terrainMat = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -206,8 +272,8 @@ export function buildTrainingWorld(
   terrainMesh.receiveShadow = true;
   scene.add(terrainMesh);
 
-  // 4. Coastal Lake Water Plane (NE basin)
-  const lakeGeo = new THREE.CircleGeometry(36, 48);
+  // 4. Expanded Lake Water Plane (NE basin)
+  const lakeGeo = new THREE.CircleGeometry(LAKE_AREA.waterRadius, 56);
   lakeGeo.rotateX(-Math.PI / 2);
   const lakeMat = new THREE.MeshPhysicalMaterial({
     color: 0x1a6985,
@@ -217,7 +283,7 @@ export function buildTrainingWorld(
     clearcoatRoughness: 0.15,
   });
   const lakeMesh = new THREE.Mesh(lakeGeo, lakeMat);
-  lakeMesh.position.set(66, -1.6, -10);
+  lakeMesh.position.set(LAKE_AREA.x, LAKE_AREA.waterLevelY, LAKE_AREA.z);
   lakeMesh.receiveShadow = true;
   scene.add(lakeMesh);
 
@@ -230,28 +296,28 @@ export function buildTrainingWorld(
     roughness: 0.78,
     metalness: 0.05,
   });
-  const padGeo = new THREE.CylinderGeometry(MAIN_HELIPAD.radius, MAIN_HELIPAD.radius + 0.35, MAIN_HELIPAD.topY, 32);
+  const padGeo = new THREE.CylinderGeometry(MAIN_HELIPAD.radius, MAIN_HELIPAD.radius + 0.35, 0.34, 32);
   const mainPad = new THREE.Mesh(padGeo, [
     new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.85 }),
     padMat,
     new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.9 }),
   ]);
-  mainPad.position.set(MAIN_HELIPAD.x, MAIN_HELIPAD.topY * 0.5, MAIN_HELIPAD.z);
+  mainPad.position.set(MAIN_HELIPAD.x, MAIN_HELIPAD.topY - 0.17, MAIN_HELIPAD.z);
   mainPad.receiveShadow = true;
   scene.add(mainPad);
 
-  // Runway approach strip heading north (-Z)
+  // Runway approach strip heading north (-Z), cleanly abutting helipad without Z-fighting terrain
   const stripMat = new THREE.MeshStandardMaterial({ color: 0x2a3441, roughness: 0.82 });
-  const stripMesh = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.06, 28), stripMat);
-  stripMesh.position.set(0, 0.03, -17);
+  const stripMesh = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.28, 38.5), stripMat);
+  stripMesh.position.set(0, -0.02, -23.75);
   stripMesh.receiveShadow = true;
   scene.add(stripMesh);
 
-  // Runway centerline dashes (offset >= 0.02 on Y to prevent Z-fighting)
+  // Runway centerline dashes clearly proud above strip top (y=0.12 -> dash y=0.125..0.165)
   const dashMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.6 });
-  for (let i = 0; i < 6; i++) {
-    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.02, 2.2), dashMat);
-    dash.position.set(0, 0.065, -7 - i * 4.2);
+  for (let i = 0; i < 9; i++) {
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.04, 2.2), dashMat);
+    dash.position.set(0, 0.145, -7 - i * 4.2);
     scene.add(dash);
   }
 
@@ -317,10 +383,10 @@ export function buildTrainingWorld(
   towerGroup.position.set(RADIO_TOWER.x, towerBaseY, RADIO_TOWER.z);
 
   const towerBase = new THREE.Mesh(
-    new THREE.BoxGeometry(4.4, 1.2, 4.4),
+    new THREE.BoxGeometry(4.4, 2.4, 4.4),
     new THREE.MeshStandardMaterial({ color: 0x475569, roughness: 0.88 })
   );
-  towerBase.position.y = 0.6;
+  towerBase.position.y = 0.0;
   towerBase.receiveShadow = true;
   towerGroup.add(towerBase);
 
@@ -369,40 +435,36 @@ export function buildTrainingWorld(
   towerGroup.add(beacon);
   scene.add(towerGroup);
 
-  // 9. Two Composite Wind Turbines on the Eastern Ridge
+  // 9. Four Composite Wind Turbines on the Outer Ridges (synced with physics hitboxes)
   const turbineRotors: THREE.Group[] = [];
-  const turbineCoords: Array<[number, number]> = [
-    [84, -46],
-    [88, 22],
-  ];
   const turbineMat = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.3, metalness: 0.2 });
   const nacelleMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.28, metalness: 0.35 });
 
-  for (const [tx, tz] of turbineCoords) {
+  for (const wt of WIND_TURBINES) {
     const tGroup = new THREE.Group();
-    const ty = groundHeightAt(tx, tz);
-    tGroup.position.set(tx, ty, tz);
-    tGroup.rotation.y = -Math.PI * 0.35;
+    const ty = groundHeightAt(wt.x, wt.z);
+    tGroup.position.set(wt.x, ty, wt.z);
+    tGroup.rotation.y = wt.yaw;
 
-    const mastMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.85, 22, 14), turbineMat);
-    mastMesh.position.y = 11;
+    const mastMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.48, 0.96, wt.mastHeight, 14), turbineMat);
+    mastMesh.position.y = wt.mastHeight * 0.5;
     mastMesh.castShadow = true;
     tGroup.add(mastMesh);
 
-    const nacelle = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.4, 3.2), nacelleMat);
-    nacelle.position.set(0, 22.2, 0.4);
+    const nacelle = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.6, 3.6), nacelleMat);
+    nacelle.position.set(0, 28.2, 0.5);
     tGroup.add(nacelle);
 
     const rotor = new THREE.Group();
-    rotor.position.set(0, 22.2, 2.1);
+    rotor.position.set(0, 28.2, 2.4);
 
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.1, 14), turbineMat);
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.68, 1.25, 14), turbineMat);
     nose.rotation.x = Math.PI / 2;
-    nose.position.z = 0.4;
+    nose.position.z = 0.45;
     rotor.add(nose);
 
-    const bladeGeo = new THREE.BoxGeometry(0.45, 9.5, 0.14);
-    bladeGeo.translate(0, 4.9, 0);
+    const bladeGeo = new THREE.BoxGeometry(0.5, 11.5, 0.16);
+    bladeGeo.translate(0, 5.9, 0);
     for (let b = 0; b < 3; b++) {
       const bladeWrap = new THREE.Group();
       bladeWrap.rotation.z = (b * Math.PI * 2) / 3;
@@ -425,10 +487,10 @@ export function buildTrainingWorld(
   hangarGroup.rotation.y = 0.65;
 
   const deck = new THREE.Mesh(
-    new THREE.BoxGeometry(7.2, 0.6, 5.2),
+    new THREE.BoxGeometry(7.2, 1.4, 5.2),
     new THREE.MeshStandardMaterial({ color: 0x78553a, roughness: 0.82 })
   );
-  deck.position.y = 0.3;
+  deck.position.y = -0.1;
   deck.receiveShadow = true;
   hangarGroup.add(deck);
 
@@ -463,33 +525,99 @@ export function buildTrainingWorld(
 
   const losAnchor = new THREE.Vector3(standPos.x + 2.2, standBaseY + 2.1, standPos.z - 2.2);
 
-  // 11. Instanced Pine Trees & Natural Perimeter Boulders
-  const treePositions: Array<{ x: number; z: number; scale: number }> = [];
-  for (let i = 0; i < 160; i++) {
-    const angle = i * 2.39996; // Golden angle distribution
-    const radius = 36 + ((i * 19.7) % 102);
-    const tx = Math.cos(angle) * radius;
-    const tz = Math.sin(angle) * radius;
+  // 10b. Pass-Through Architectural Structures (Abandoned Houses, Ruins, Hangar, Containers, Bridge)
+  const masonryBump = createMasonryBumpTexture();
+  masonryBump.anisotropy = maxAniso;
 
-    // Keep airfield center, lake, elevated pad, and tower clear
-    const lakeD = Math.hypot(tx - 66, tz + 10);
-    const padD = Math.hypot(tx - ELEVATED_PAD.x, tz - ELEVATED_PAD.z);
-    const towerD = Math.hypot(tx - RADIO_TOWER.x, tz - RADIO_TOWER.z);
-    const ty = groundHeightAt(tx, tz);
-    if (lakeD < 29 || padD < 11 || towerD < 10 || ty < -0.3) continue;
+  const structureMaterials: Record<StructureMaterialKey, THREE.MeshStandardMaterial> = {
+    concrete_weathered: new THREE.MeshStandardMaterial({
+      color: 0x8b949e,
+      roughness: 0.88,
+      metalness: 0.04,
+      bumpMap: masonryBump,
+      bumpScale: 0.12,
+    }),
+    brick_ruin: new THREE.MeshStandardMaterial({
+      color: 0x9b5744,
+      roughness: 0.9,
+      metalness: 0.03,
+      bumpMap: masonryBump,
+      bumpScale: 0.16,
+    }),
+    wood_aged: new THREE.MeshStandardMaterial({
+      color: 0x6f533b,
+      roughness: 0.82,
+      metalness: 0.02,
+    }),
+    stone_ancient: new THREE.MeshStandardMaterial({
+      color: 0xa29c8a,
+      roughness: 0.92,
+      metalness: 0.02,
+      bumpMap: masonryBump,
+      bumpScale: 0.18,
+    }),
+    steel_dark: new THREE.MeshStandardMaterial({
+      color: 0x374151,
+      roughness: 0.45,
+      metalness: 0.62,
+    }),
+    steel_rust: new THREE.MeshStandardMaterial({
+      color: 0x7c4632,
+      roughness: 0.62,
+      metalness: 0.45,
+    }),
+    container_blue: new THREE.MeshStandardMaterial({
+      color: 0x1d4ed8,
+      roughness: 0.38,
+      metalness: 0.35,
+    }),
+    container_red: new THREE.MeshStandardMaterial({
+      color: 0xb91c1c,
+      roughness: 0.38,
+      metalness: 0.35,
+    }),
+    container_amber: new THREE.MeshStandardMaterial({
+      color: 0xd97706,
+      roughness: 0.36,
+      metalness: 0.35,
+    }),
+    metal_roof: new THREE.MeshStandardMaterial({
+      color: 0x52606d,
+      roughness: 0.52,
+      metalness: 0.48,
+    }),
+  };
 
-    const scale = 0.85 + ((i * 7) % 30) / 100; // ±15% natural scale variation
-    treePositions.push({ x: tx, z: tz, scale });
+  const unitBoxGeo = new THREE.BoxGeometry(1, 1, 1);
+  const { parts: structureParts, anchors: structureAnchors } = buildWorldStructures(groundHeightAt);
+  const structureGroup = new THREE.Group();
+  const environmentColliders: THREE.Object3D[] = [];
+
+  for (const part of structureParts) {
+    const mesh = new THREE.Mesh(unitBoxGeo, structureMaterials[part.material]);
+    mesh.position.set(part.cx, part.cy, part.cz);
+    mesh.scale.set(part.hx * 2, part.hy * 2, part.hz * 2);
+    mesh.rotation.y = part.yaw;
+    mesh.castShadow = Boolean(part.castShadow);
+    mesh.receiveShadow = true;
+    structureGroup.add(mesh);
+    if (part.solid) {
+      environmentColliders.push(mesh);
+    }
   }
+  scene.add(structureGroup);
 
-  const trunkGeo = new THREE.CylinderGeometry(0.22, 0.34, 2.6, 7);
-  trunkGeo.translate(0, 1.3, 0);
+  // 11. Instanced Pine Trees (1:1 synced with physics tree colliders) & Natural Perimeter Boulders
+  const treePositions = getWorldTrees();
+
+  const trunkGeo = new THREE.CylinderGeometry(0.24, 0.38, 2.8, 7);
+  trunkGeo.translate(0, 1.4, 0);
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.92 });
   const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treePositions.length);
   trunkInst.castShadow = true;
 
-  const foliageGeo = new THREE.ConeGeometry(1.9, 5.4, 8);
-  foliageGeo.translate(0, 4.8, 0);
+  const foliageGeo = new THREE.ConeGeometry(2.1, 5.8, 8);
+  foliageGeo.translate(0, 5.1, 0);
   const foliageMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.82 });
   const foliageInst = new THREE.InstancedMesh(foliageGeo, foliageMat, treePositions.length);
   foliageInst.castShadow = true;
@@ -498,8 +626,7 @@ export function buildTrainingWorld(
   const dummy = new THREE.Object3D();
   const treeColor = new THREE.Color();
   treePositions.forEach((tp, idx) => {
-    const gy = groundHeightAt(tp.x, tp.z);
-    dummy.position.set(tp.x, gy - 0.1, tp.z);
+    dummy.position.set(tp.x, tp.baseY, tp.z);
     dummy.rotation.set(0, (idx * 1.7) % (Math.PI * 2), 0);
     dummy.scale.setScalar(tp.scale);
     dummy.updateMatrix();
@@ -515,27 +642,38 @@ export function buildTrainingWorld(
   scene.add(trunkInst);
   scene.add(foliageInst);
 
-  // Instanced Boulders around foothills & lake shore
-  const rockGeo = new THREE.DodecahedronGeometry(1.1, 0);
+  // Instanced Boulders around foothills & lake shore (avoiding interiors)
+  const rockGeo = new THREE.DodecahedronGeometry(1.15, 0);
   const rockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.05 });
-  const rockCount = 64;
-  const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);
-  rockInst.receiveShadow = true;
-  for (let i = 0; i < rockCount; i++) {
+  const rockPositions: Array<{ x: number; z: number; s: number; idx: number }> = [];
+  for (let i = 0; i < 140; i++) {
     const a = i * 1.93;
-    const r = 42 + ((i * 23) % 95);
+    const r = 64 + ((i * 31) % 260);
     const rx = Math.cos(a) * r;
     const rz = Math.sin(a) * r;
-    const ry = groundHeightAt(rx, rz);
-    dummy.position.set(rx, ry + 0.3, rz);
-    dummy.rotation.set(i * 0.5, i * 1.1, i * 0.3);
-    const s = 0.7 + ((i * 11) % 12) * 0.12;
-    dummy.scale.set(s * 1.2, s * 0.75, s);
+    let blocked = false;
+    for (const anc of structureAnchors) {
+      if (Math.hypot(rx - anc.x, rz - anc.z) < anc.radius) {
+        blocked = true;
+        break;
+      }
+    }
+    if (blocked) continue;
+    const s = 0.7 + ((i * 11) % 14) * 0.14;
+    rockPositions.push({ x: rx, z: rz, s, idx: i });
+  }
+  const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, rockPositions.length);
+  rockInst.receiveShadow = true;
+  rockPositions.forEach((rp, i) => {
+    const ry = groundHeightAt(rp.x, rp.z);
+    dummy.position.set(rp.x, ry + 0.3, rp.z);
+    dummy.rotation.set(rp.idx * 0.5, rp.idx * 1.1, rp.idx * 0.3);
+    dummy.scale.set(rp.s * 1.25, rp.s * 0.78, rp.s);
     dummy.updateMatrix();
     rockInst.setMatrixAt(i, dummy.matrix);
     treeColor.setHSL(0.6, 0.06, 0.36 + (i % 4) * 0.05);
     rockInst.setColorAt(i, treeColor);
-  }
+  });
   rockInst.computeBoundingSphere();
   scene.add(rockInst);
 
@@ -595,7 +733,8 @@ export function buildTrainingWorld(
         roughness: 0.25,
         metalness: 0.3,
       });
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(g.radius * 0.85, 0.22, 12, 32), ringMat);
+      const ringRadius = g.noPylons ? g.radius * 0.68 : g.radius * 0.85;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(ringRadius, g.noPylons ? 0.14 : 0.22, 12, 32), ringMat);
       grp.add(ring);
 
       const beaconMat = new THREE.MeshBasicMaterial({
@@ -605,20 +744,22 @@ export function buildTrainingWorld(
         side: THREE.DoubleSide,
         depthWrite: false,
       });
-      const innerDisc = new THREE.Mesh(new THREE.CircleGeometry(g.radius * 0.82, 24), beaconMat);
+      const innerDisc = new THREE.Mesh(new THREE.CircleGeometry(ringRadius * 0.96, 24), beaconMat);
       grp.add(innerDisc);
 
-      // Left & right support pylons down to terrain
-      const gy = groundHeightAt(g.x, g.z);
-      const legHeight = Math.max(1, g.y - gy);
-      for (const side of [-1, 1]) {
-        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, legHeight, 8), pylonMat);
-        post.position.set(side * (g.radius * 0.88), -legHeight * 0.5, 0);
-        grp.add(post);
+      if (!g.noPylons) {
+        // Left & right support pylons down to terrain
+        const gy = groundHeightAt(g.x, g.z);
+        const legHeight = Math.max(1, g.y - gy);
+        for (const side of [-1, 1]) {
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, legHeight, 8), pylonMat);
+          post.position.set(side * (g.radius * 0.88), -legHeight * 0.5, 0);
+          grp.add(post);
 
-        const cap = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), pylonAccentMat);
-        cap.position.set(side * (g.radius * 0.88), 0, 0);
-        grp.add(cap);
+          const cap = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), pylonAccentMat);
+          cap.position.set(side * (g.radius * 0.88), 0, 0);
+          grp.add(cap);
+        }
       }
 
       gateGroup.add(grp);
@@ -686,12 +827,17 @@ export function buildTrainingWorld(
     gateVisuals,
     losAnchor,
     sunLight,
+    sunDirection: sunVec,
+    environmentColliders,
     updateMissionVisuals,
     dispose: () => {
       envTex.dispose();
       terrainGeo.dispose();
       terrainMat.dispose();
       terrainBump.dispose();
+      masonryBump.dispose();
+      unitBoxGeo.dispose();
+      Object.values(structureMaterials).forEach((m) => m.dispose());
       mainPadTex.dispose();
       elevPadTex.dispose();
       trunkGeo.dispose();

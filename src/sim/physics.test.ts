@@ -1,13 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  WIND_TURBINES,
+  WORLD_RADIUS,
   computeBodyUpVector,
   createInitialDroneState,
+  getWorldTrees,
   groundHeightAt,
   stepDronePhysics,
   surfaceHeightAt,
 } from './physics';
-import { createInitialMissionProgress, evaluateMissionStep } from './missions';
+import { STRUCTURE_SLAB_ELEVATION, buildWorldStructures } from './structures';
+import { MISSIONS, getMissionById, createInitialMissionProgress, evaluateMissionStep } from './missions';
 import { computeFloatingStickOrigin, computeFloatingStickValue } from './floatingStick';
 import type { PhysicsConfig, StickInput } from './types';
 
@@ -123,4 +127,263 @@ test('floating joystick preserves sticky throttle smoothly on re-touch', () => {
   const initialVal = computeFloatingStickValue(100, 200, origin, 80);
   assert.equal(initialVal.x, 0);
   assert.ok(Math.abs(initialVal.y - 0.5) < 1e-6);
+});
+
+test('expanded world supports wide-open flight beyond 250m', () => {
+  assert.ok(WORLD_RADIUS >= 350);
+  let drone = createInitialDroneState();
+  drone.onGround = false;
+  drone.position = { x: 240, y: 25, z: -200 };
+  drone = stepDronePhysics(drone, neutralInput, normalConfig, 1 / 60);
+  assert.equal(drone.crashed, false);
+  assert.ok(drone.position.x > 235);
+});
+
+test('structure_slalom openings are genuinely unobstructed for precision flight', () => {
+  const slalom = getMissionById('structure_slalom');
+  assert.equal(slalom.gates.length, 8);
+  for (const g of slalom.gates) {
+    // Fly straight through each gate along its yaw axis for 14m (-7m to +7m)
+    const dirX = -Math.sin(g.yaw);
+    const dirZ = -Math.cos(g.yaw);
+    let drone = createInitialDroneState();
+    drone.onGround = false;
+    drone.yaw = g.yaw;
+    drone.position = { x: g.x - dirX * 7, y: g.y, z: g.z - dirZ * 7 };
+    drone.velocity = { x: dirX * 7, y: 0, z: dirZ * 7 };
+
+    for (let i = 0; i < 120; i++) {
+      drone = stepDronePhysics(drone, { throttle: 0, yaw: 0, pitch: 0.25, roll: 0 }, normalConfig, 1 / 60);
+      assert.equal(drone.crashed, false, `Unexpected collision passing through gate (${g.x}, ${g.y}, ${g.z})`);
+    }
+  }
+});
+
+test('abandoned house brick wall crashes at high speed and bounces gently at low speed', () => {
+  // Two-story house at (-82, -48), yaw 0.35; front left brick pier sits at local (-4.5, 1.7, 4.8)
+  const yaw = 0.35;
+  const c = Math.cos(yaw);
+  const s = Math.sin(yaw);
+  const lx = -4.5;
+  const lz = 4.8;
+  const wallX = -82 + lx * c + lz * s;
+  const wallZ = -48 - lx * s + lz * c;
+  const baseY = groundHeightAt(-82, -48) + STRUCTURE_SLAB_ELEVATION;
+
+  // High speed slam (14 m/s from 1.2m outside the wall) -> crashes
+  let fastDrone = createInitialDroneState();
+  fastDrone.onGround = false;
+  fastDrone.position = { x: wallX + s * 1.2, y: baseY + 1.7, z: wallZ + c * 1.2 };
+  fastDrone.velocity = { x: -s * 14, y: 0, z: -c * 14 };
+
+  for (let i = 0; i < 20; i++) {
+    fastDrone = stepDronePhysics(fastDrone, neutralInput, normalConfig, 1 / 60);
+    if (fastDrone.crashed) break;
+  }
+  assert.equal(fastDrone.crashed, true, 'Expected high-speed wall impact to crash');
+
+  // Gentle bump (3 m/s from 1.0m outside the wall) -> rebounds without crashing
+  let slowDrone = createInitialDroneState();
+  slowDrone.onGround = false;
+  slowDrone.position = { x: wallX + s * 1.0, y: baseY + 1.7, z: wallZ + c * 1.0 };
+  slowDrone.velocity = { x: -s * 3, y: 0, z: -c * 3 };
+
+  for (let i = 0; i < 30; i++) {
+    slowDrone = stepDronePhysics(slowDrone, neutralInput, normalConfig, 1 / 60);
+  }
+  assert.equal(slowDrone.crashed, false, 'Expected gentle wall bump to bounce instead of crashing');
+});
+
+test('no two boxes in buildWorldStructures overlap in 3D volume (zero Z-fighting seams)', () => {
+  const { parts } = buildWorldStructures(groundHeightAt);
+  for (let i = 0; i < parts.length; i++) {
+    for (let j = i + 1; j < parts.length; j++) {
+      const a = parts[i];
+      const b = parts[j];
+      if (Math.abs(a.yaw - b.yaw) > 1e-4) continue;
+      // Compare in shared local space
+      const c = Math.cos(a.yaw);
+      const s = Math.sin(a.yaw);
+      const dx = b.cx - a.cx;
+      const dy = b.cy - a.cy;
+      const dz = b.cz - a.cz;
+      const lx = Math.abs(dx * c - dz * s);
+      const lz = Math.abs(dx * s + dz * c);
+      const ly = Math.abs(dy);
+
+      const ox = a.hx + b.hx - lx;
+      const oy = a.hy + b.hy - ly;
+      const oz = a.hz + b.hz - lz;
+      assert.ok(
+        !(ox > 0.005 && oy > 0.005 && oz > 0.005),
+        `Overlapping structure boxes detected at yaw=${a.yaw}: (${a.cx.toFixed(2)},${a.cy.toFixed(2)},${a.cz.toFixed(2)}) [${a.material}] vs (${b.cx.toFixed(2)},${b.cy.toFixed(2)},${b.cz.toFixed(2)}) [${b.material}] overlap=(${ox.toFixed(3)},${oy.toFixed(3)},${oz.toFixed(3)})`
+      );
+    }
+  }
+});
+
+test('wind turbine mast and spinning blades have real hitboxes', () => {
+  const wt = WIND_TURBINES[3]; // (85, -225)
+  const baseY = groundHeightAt(wt.x, wt.z);
+
+  // 1. Slam into mast at mid-height
+  let mastDrone = createInitialDroneState();
+  mastDrone.onGround = false;
+  mastDrone.position = { x: wt.x + 1.8, y: baseY + 14, z: wt.z };
+  mastDrone.velocity = { x: -12, y: 0, z: 0 };
+  for (let i = 0; i < 20; i++) {
+    mastDrone = stepDronePhysics(mastDrone, neutralInput, normalConfig, 1 / 60);
+    if (mastDrone.crashed) break;
+  }
+  assert.equal(mastDrone.crashed, true, 'Expected wind turbine mast impact to crash');
+
+  // 2. Contact spinning blade #0 (pointing straight up +Y at rotorAngle=0) 6m above hub
+  const c = Math.cos(wt.yaw);
+  const s = Math.sin(wt.yaw);
+  // Hub is at local (0, 28.2, 2.4); blade #0 at 6m up is local (0, 34.2, 2.4)
+  const worldBladeX = wt.x + 2.4 * s;
+  const worldBladeZ = wt.z + 2.4 * c;
+  let bladeDrone = createInitialDroneState();
+  bladeDrone.onGround = false;
+  bladeDrone.position = { x: worldBladeX, y: baseY + 34.2, z: worldBladeZ };
+  bladeDrone = stepDronePhysics(bladeDrone, neutralInput, { ...normalConfig, turbineAngle: 0 }, 1 / 60);
+  assert.equal(bladeDrone.crashed, true, 'Expected contact with spinning turbine blade to crash');
+});
+
+test('every structure floor slab clears local terrain cleanly to prevent floor Z-fighting', () => {
+  const { parts } = buildWorldStructures(groundHeightAt);
+  // Check every non-shadow-casting foundation/floor slab across its center + 4 corners
+  const slabs = parts.filter((p) => !p.castShadow);
+  assert.ok(slabs.length >= 10, 'Expected foundation/floor slabs to audit');
+  for (const slab of slabs) {
+    const topY = slab.cy + slab.hy;
+    const c = Math.cos(slab.yaw);
+    const s = Math.sin(slab.yaw);
+    for (const sx of [-1, 0, 1]) {
+      for (const sz of [-1, 0, 1]) {
+        const lx = sx * slab.hx;
+        const lz = sz * slab.hz;
+        const wx = slab.cx + lx * c + lz * s;
+        const wz = slab.cz - lx * s + lz * c;
+        const gy = groundHeightAt(wx, wz);
+        assert.ok(
+          topY - gy >= 0.25,
+          `Floor slab (${slab.cx.toFixed(1)},${slab.cz.toFixed(1)}) topY=${topY.toFixed(2)} too close to groundY=${gy.toFixed(2)} at (${wx.toFixed(1)},${wz.toFixed(1)})`
+        );
+      }
+    }
+  }
+});
+
+test('no structure-mounted ring torus clips through bars, walls, or floors', () => {
+  const { parts } = buildWorldStructures(groundHeightAt);
+  for (const missionId of ['structure_slalom', 'free_flight'] as const) {
+    const mission = getMissionById(missionId);
+    for (const g of mission.gates) {
+      if (!g.noPylons) continue;
+      const ringRadius = g.radius * 0.68;
+      const tubeMargin = 0.14;
+      const gc = Math.cos(g.yaw);
+      const gs = Math.sin(g.yaw);
+
+      for (let k = 0; k < 24; k++) {
+        const theta = (k * Math.PI * 2) / 24;
+        const rlx = Math.cos(theta) * ringRadius;
+        const rly = Math.sin(theta) * ringRadius;
+        const px = g.x + rlx * gc;
+        const py = g.y + rly;
+        const pz = g.z - rlx * gs;
+
+        for (const box of parts) {
+          const dx = px - box.cx;
+          const dy = py - box.cy;
+          const dz = pz - box.cz;
+          const bc = Math.cos(box.yaw);
+          const bs = Math.sin(box.yaw);
+          const blx = dx * bc - dz * bs;
+          const blz = dx * bs + dz * bc;
+          const penX = box.hx + tubeMargin - Math.abs(blx);
+          const penY = box.hy + tubeMargin - Math.abs(dy);
+          const penZ = box.hz + tubeMargin - Math.abs(blz);
+          assert.ok(
+            !(penX > 0 && penY > 0 && penZ > 0),
+            `Gate torus in ${missionId} at (${g.x},${g.y.toFixed(2)},${g.z}) intersects [${box.material}] at (${box.cx.toFixed(1)},${box.cy.toFixed(1)},${box.cz.toFixed(1)})`
+          );
+        }
+      }
+    }
+  }
+});
+
+test('Q/E yaw turning accelerates smoothly and eases out when released', () => {
+  let drone = createInitialDroneState();
+  drone.onGround = false;
+  drone.position = { x: 0, y: 12, z: 0 };
+
+  // Frame 1 with yaw right held: angVel.y ramps smoothly instead of jumping straight to max
+  drone = stepDronePhysics(drone, { throttle: 0, yaw: 1, pitch: 0, roll: 0 }, normalConfig, 1 / 60);
+  const firstFrameRate = Math.abs(drone.angVel.y);
+  assert.ok(firstFrameRate > 0.05 && firstFrameRate < 1.0, `Expected smooth ramp on frame 1, got ${firstFrameRate}`);
+
+  for (let i = 0; i < 30; i++) {
+    drone = stepDronePhysics(drone, { throttle: 0, yaw: 1, pitch: 0, roll: 0 }, normalConfig, 1 / 60);
+  }
+  const steadyRate = Math.abs(drone.angVel.y);
+  assert.ok(steadyRate > 1.8, `Expected full yaw rate after ramp, got ${steadyRate}`);
+
+  // Release Q/E: rotational inertia decays smoothly rather than snapping to 0 in one frame
+  drone = stepDronePhysics(drone, neutralInput, normalConfig, 1 / 60);
+  assert.ok(Math.abs(drone.angVel.y) > 0.5 && Math.abs(drone.angVel.y) < steadyRate);
+});
+
+test('all pine trees have real trunk and foliage cone collisions and keep gates clear', () => {
+  const trees = getWorldTrees();
+  assert.ok(trees.length > 50, 'Expected generated world trees');
+  const t = trees[0];
+
+  // 1. High-speed slam into tree trunk crashes
+  let trunkSlam = createInitialDroneState();
+  trunkSlam.onGround = false;
+  trunkSlam.position = { x: t.x + 1.2, y: t.baseY + 1.2 * t.scale, z: t.z };
+  trunkSlam.velocity = { x: -12, y: 0, z: 0 };
+  for (let i = 0; i < 20; i++) {
+    trunkSlam = stepDronePhysics(trunkSlam, neutralInput, normalConfig, 1 / 60);
+    if (trunkSlam.crashed) break;
+  }
+  assert.equal(trunkSlam.crashed, true, 'Expected high-speed tree trunk impact to crash');
+
+  // 2. High-speed fly into pine cone foliage crashes
+  let foliageSlam = createInitialDroneState();
+  foliageSlam.onGround = false;
+  foliageSlam.position = { x: t.x + 2.5 * t.scale, y: t.baseY + 3.5 * t.scale, z: t.z };
+  foliageSlam.velocity = { x: -12, y: 0, z: 0 };
+  for (let i = 0; i < 20; i++) {
+    foliageSlam = stepDronePhysics(foliageSlam, neutralInput, normalConfig, 1 / 60);
+    if (foliageSlam.crashed) break;
+  }
+  assert.equal(foliageSlam.crashed, true, 'Expected high-speed pine foliage impact to crash');
+
+  // 3. Low-speed touch against pine foliage bounces cleanly without crashing
+  let foliageTouch = createInitialDroneState();
+  foliageTouch.onGround = false;
+  foliageTouch.position = { x: t.x + 2.0 * t.scale, y: t.baseY + 3.5 * t.scale, z: t.z };
+  foliageTouch.velocity = { x: -3, y: 0, z: 0 };
+  for (let i = 0; i < 25; i++) {
+    foliageTouch = stepDronePhysics(foliageTouch, neutralInput, normalConfig, 1 / 60);
+  }
+  assert.equal(foliageTouch.crashed, false, 'Expected gentle foliage brush to bounce without crashing');
+  assert.ok(foliageTouch.position.x > t.x + 1.5 * t.scale, 'Expected foliage collision to push drone out');
+
+  // 4. Verify no mission gate intersects any tree cone or trunk
+  for (const mission of MISSIONS) {
+    for (const g of mission.gates) {
+      for (const tree of trees) {
+        const horizD = Math.hypot(g.x - tree.x, g.z - tree.z);
+        const topY = tree.baseY + 8.0 * tree.scale;
+        if (g.y <= topY + 1.0 && horizD < 2.1 * tree.scale + 1.5) {
+          assert.fail(`Tree at (${tree.x.toFixed(1)},${tree.z.toFixed(1)}) blocks gate in ${mission.id}`);
+        }
+      }
+    }
+  }
 });

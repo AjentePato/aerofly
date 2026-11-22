@@ -1,4 +1,5 @@
-import { ELEVATED_PAD } from './physics';
+import { ELEVATED_PAD, groundHeightAt } from './physics';
+import { STRUCTURE_SLAB_ELEVATION } from './structures';
 import type { DronePhysicsState, GatePoint, MissionDefinition, MissionId, MissionProgress } from './types';
 
 export const MISSIONS: MissionDefinition[] = [
@@ -68,21 +69,45 @@ export const MISSIONS: MissionDefinition[] = [
     },
   },
   {
-    id: 'free_flight',
+    id: 'structure_slalom',
     code: '05',
+    title: 'Estruturas & Ruínas',
+    subtitle: 'Passe por dentro de casas, ruínas e túnel',
+    goalHint: 'Atravesse os 8 pontos passando por dentro do pórtico, casas abandonadas, aqueduto, hangar, contêiner e ponte.',
+    recommendedMode: 'normal',
+    gates: [
+      { x: 0, y: 2.55, z: -36, radius: 2.9, yaw: 0, noPylons: true },
+      { x: -82, y: groundHeightAt(-82, -48) + STRUCTURE_SLAB_ELEVATION + 1.7, z: -48, radius: 2.1, yaw: 0.35, noPylons: true },
+      { x: -112, y: groundHeightAt(-112, -68) + STRUCTURE_SLAB_ELEVATION + 1.6, z: -68, radius: 2.0, yaw: -0.45, noPylons: true },
+      { x: -96, y: groundHeightAt(-96, -102) + STRUCTURE_SLAB_ELEVATION + 2.2, z: -102, radius: 2.6, yaw: 0.8, noPylons: true },
+      { x: -95, y: groundHeightAt(-95, 78) + STRUCTURE_SLAB_ELEVATION + 3.4, z: 78, radius: 3.4, yaw: -0.3, noPylons: true },
+      { x: 96, y: groundHeightAt(96, 68) + STRUCTURE_SLAB_ELEVATION + 2.95, z: 68, radius: 3.4, yaw: -0.55, noPylons: true },
+      { x: 138, y: groundHeightAt(138, 105) + STRUCTURE_SLAB_ELEVATION + 4.35, z: 105, radius: 1.5, yaw: 0.25, noPylons: true },
+      { x: 148, y: 1.6, z: -32, radius: 3.4, yaw: 0.2, noPylons: true },
+    ],
+  },
+  {
+    id: 'free_flight',
+    code: '06',
     title: 'Voo Livre · Mundo Aberto',
-    subtitle: 'Exploração sem restrições pelo vale',
-    goalHint: 'Explore livremente o campo aéreo, torre, lago e turbinas eólicas. Colete os anéis dourados pelo mapa.',
+    subtitle: 'Mapa amplo com vila, ruínas e hangar',
+    goalHint: 'Explore o vale de 720m, entre nas casas abandonadas, ruínas, hangar, ponte e túnel norte para coletar os 14 anéis.',
     recommendedMode: 'sport',
     gates: [
-      { x: 0, y: 6.5, z: -26, radius: 4.2, yaw: 0 },
-      { x: 56, y: 9.0, z: -12, radius: 4.4, yaw: 0.7 },
-      { x: 64, y: 11.0, z: -56, radius: 4.4, yaw: 1.5 },
-      { x: -26, y: 15.0, z: -76, radius: 4.4, yaw: 2.6 },
-      { x: -58, y: 10.0, z: -22, radius: 4.4, yaw: 3.1 },
-      { x: -42, y: 8.5, z: 32, radius: 4.4, yaw: -1.1 },
-      { x: 26, y: 10.0, z: 46, radius: 4.4, yaw: -0.4 },
-      { x: 76, y: 16.0, z: 34, radius: 4.5, yaw: 0.3 },
+      { x: 0, y: 6.82, z: -36, radius: 1.65, yaw: 0, noPylons: true },
+      { x: -82, y: groundHeightAt(-82, -48) + STRUCTURE_SLAB_ELEVATION + 5.3, z: -48, radius: 1.45, yaw: 0.35, noPylons: true },
+      { x: -135, y: groundHeightAt(-135, -45) + STRUCTURE_SLAB_ELEVATION + 1.6, z: -45, radius: 2.0, yaw: 1.15, noPylons: true },
+      { x: -96, y: groundHeightAt(-96, -102) + STRUCTURE_SLAB_ELEVATION + 2.2, z: -102, radius: 2.6, yaw: 0.8, noPylons: true },
+      { x: 24, y: groundHeightAt(24, -175) + STRUCTURE_SLAB_ELEVATION + 2.15, z: -175, radius: 2.5, yaw: 0.15, noPylons: true },
+      { x: 64, y: 24.0, z: -214, radius: 4.8, yaw: 0.45 },
+      { x: 114, y: 1.0, z: -55, radius: 2.4, yaw: 0.72, noPylons: true },
+      { x: 148, y: 7.5, z: -32, radius: 2.6, yaw: 0.2 + Math.PI * 0.5, noPylons: true },
+      { x: 148, y: 1.6, z: -32, radius: 3.4, yaw: 0.2, noPylons: true },
+      { x: 96, y: groundHeightAt(96, 68) + STRUCTURE_SLAB_ELEVATION + 2.95, z: 68, radius: 3.4, yaw: -0.55, noPylons: true },
+      { x: 138, y: groundHeightAt(138, 105) + STRUCTURE_SLAB_ELEVATION + 4.35, z: 105, radius: 1.5, yaw: 0.25, noPylons: true },
+      { x: 82, y: groundHeightAt(82, 125) + STRUCTURE_SLAB_ELEVATION + 4.8, z: 125, radius: 3.8, yaw: 0.1, noPylons: true },
+      { x: -95, y: groundHeightAt(-95, 78) + STRUCTURE_SLAB_ELEVATION + 3.4, z: 78, radius: 3.4, yaw: -0.3, noPylons: true },
+      { x: -145, y: groundHeightAt(-145, 122) + STRUCTURE_SLAB_ELEVATION + 2.5, z: 122, radius: 2.8, yaw: 0.4, noPylons: true },
     ],
   },
 ];

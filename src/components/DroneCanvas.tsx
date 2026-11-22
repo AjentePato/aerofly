@@ -50,7 +50,11 @@ const _forwardDir = new THREE.Vector3();
 const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _fpvWorldPos = new THREE.Vector3();
 const _fpvWorldQuat = new THREE.Quaternion();
-const _fpvForward = new THREE.Vector3();
+const _fpvTiltEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _fpvTiltQuat = new THREE.Quaternion();
+const _camRayOrigin = new THREE.Vector3();
+const _camRayDir = new THREE.Vector3();
+const _camRaycaster = new THREE.Raycaster();
 
 export function DroneCanvas(props: SimBridgeProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -89,8 +93,8 @@ export function DroneCanvas(props: SimBridgeProps) {
     const camera = new THREE.PerspectiveCamera(
       62,
       (container.clientWidth || window.innerWidth) / (container.clientHeight || window.innerHeight),
-      0.15,
-      1200
+      0.25,
+      1800
     );
 
     const world = buildTrainingWorld(scene, renderer, isSoftwareGl);
@@ -115,6 +119,9 @@ export function DroneCanvas(props: SimBridgeProps) {
     let prevTimestamp = performance.now();
     let camShakeTrauma = 0;
     let propAngle = 0;
+    let turbineAngle = 0;
+    let visualChaseYaw = 0;
+    let visualYawBank = 0;
 
     // Initialize camera behind spawn helipad facing the radio tower & gates
     _camDesiredPos.set(0, 2.8, 5.2);
@@ -252,6 +259,8 @@ export function DroneCanvas(props: SimBridgeProps) {
       droneState = createInitialDroneState();
       missionProgress = createInitialMissionProgress(missionId);
       camShakeTrauma = 0;
+      visualChaseYaw = droneState.yaw;
+      visualYawBank = 0;
       clearKeys();
     }
 
@@ -280,8 +289,9 @@ export function DroneCanvas(props: SimBridgeProps) {
       lastPhase = cur.phase;
 
       // Ambient world motion (wind turbines, windsock, tower beacon)
+      turbineAngle -= dt * (cur.windEnabled ? 1.8 : 0.85);
       for (const rotor of world.turbineRotors) {
-        rotor.rotation.z -= dt * (cur.windEnabled ? 1.8 : 0.85);
+        rotor.rotation.z = turbineAngle;
       }
       world.windsockCone.rotation.y = Math.sin(elapsed * 2.2) * (cur.windEnabled ? 0.32 : 0.12);
       world.windsockCone.rotation.z = cur.windEnabled ? -0.1 : -0.38;
@@ -316,7 +326,7 @@ export function DroneCanvas(props: SimBridgeProps) {
         droneState = stepDronePhysics(
           droneState,
           activeSticks,
-          { flightMode: cur.flightMode, windEnabled: cur.windEnabled, windTimeSec: elapsed },
+          { flightMode: cur.flightMode, windEnabled: cur.windEnabled, windTimeSec: elapsed, turbineAngle },
           dt
         );
 
@@ -335,14 +345,24 @@ export function DroneCanvas(props: SimBridgeProps) {
           cur.onCrash(missionProgress, droneState);
         }
 
-        // Apply drone transform
+        // Smooth coordinated yaw-bank visual lean + gimbal pan lead when turning (Q/E)
+        const targetYawBank =
+          cur.flightMode === 'acro' || droneState.onGround
+            ? 0
+            : Math.max(-0.22, Math.min(0.22, droneState.angVel.y * 0.085));
+        visualYawBank += (targetYawBank - visualYawBank) * (1 - Math.exp(-10 * dt));
+        visualChaseYaw += (droneState.yaw - visualChaseYaw) * (1 - Math.exp(-7.5 * dt));
+
+        // Apply drone transform (coordinated visual bank makes turns visibly fluid)
         droneRig.root.position.set(droneState.position.x, droneState.position.y, droneState.position.z);
-        _euler.set(droneState.pitch, droneState.yaw, droneState.roll, 'YXZ');
+        _euler.set(droneState.pitch, droneState.yaw, droneState.roll + visualYawBank, 'YXZ');
         droneRig.root.quaternion.setFromEuler(_euler);
 
-        // Gimbal stabilization counter-tilt (realistic 2-axis gimbal!)
+        // Gimbal stabilization counter-tilt + subtle look-into-turn yaw lead
+        const yawLead = droneState.onGround ? 0 : Math.max(-0.16, Math.min(0.16, droneState.angVel.y * 0.06));
         droneRig.gimbalHead.rotation.x = cur.cameraMode === 'fpv' ? 0.12 : -droneState.pitch * 0.75;
-        droneRig.gimbalHead.rotation.z = cur.cameraMode === 'fpv' ? 0 : -droneState.roll * 0.75;
+        droneRig.gimbalHead.rotation.y = cur.cameraMode === 'fpv' ? yawLead * 0.5 : yawLead;
+        droneRig.gimbalHead.rotation.z = cur.cameraMode === 'fpv' ? 0 : -(droneState.roll + visualYawBank * 0.45) * 0.75;
 
         // Spin propellers proportional to motorPower
         const rpmScale = droneState.armed ? 14 + droneState.motorPower * 65 : 0;
@@ -371,11 +391,20 @@ export function DroneCanvas(props: SimBridgeProps) {
           droneRig.root.updateMatrixWorld(true);
           droneRig.fpvMount.getWorldPosition(_fpvWorldPos);
           droneRig.root.getWorldQuaternion(_fpvWorldQuat);
-          _fpvForward.set(0, -0.05, -1).applyQuaternion(_fpvWorldQuat).normalize();
-          _camLookAt.copy(_fpvWorldPos).addScaledVector(_fpvForward, 15);
+
+          // FPV camera uptilt: level (-0.02 rad) when stationary/hovering, compensating upward as nose dips forward
+          const forwardDip = Math.max(0, -droneState.pitch);
+          const fpvUptilt =
+            cur.flightMode === 'acro'
+              ? droneState.onGround
+                ? -0.02
+                : 0.24
+              : -0.02 + forwardDip * 0.88;
+          _fpvTiltEuler.set(fpvUptilt, yawLead * 0.35, 0, 'YXZ');
+          _fpvTiltQuat.setFromEuler(_fpvTiltEuler);
 
           camera.position.copy(_fpvWorldPos);
-          camera.quaternion.copy(_fpvWorldQuat);
+          camera.quaternion.copy(_fpvWorldQuat).multiply(_fpvTiltQuat);
           const targetFov = 86 + Math.min(12, speed * 0.45);
           if (Math.abs(camera.fov - targetFov) > 0.1) {
             camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-8 * dt));
@@ -394,9 +423,9 @@ export function DroneCanvas(props: SimBridgeProps) {
             camera.updateProjectionMatrix();
           }
         } else {
-          // Chase Cam
+          // Chase Cam: smooth yaw lag lets you watch the drone bank & pivot cleanly during Q/E turns
           droneRig.root.visible = true;
-          _forwardDir.set(-Math.sin(droneState.yaw), 0, -Math.cos(droneState.yaw));
+          _forwardDir.set(-Math.sin(visualChaseYaw), 0, -Math.cos(visualChaseYaw));
           _camDesiredPos
             .set(droneState.position.x, droneState.position.y, droneState.position.z)
             .addScaledVector(_forwardDir, -4.4);
@@ -406,6 +435,21 @@ export function DroneCanvas(props: SimBridgeProps) {
           const camGround = groundHeightAt(_camDesiredPos.x, _camDesiredPos.z);
           if (_camDesiredPos.y < camGround + 0.85) {
             _camDesiredPos.y = camGround + 0.85;
+          }
+
+          // Pull Chase Cam forward before clipping through building/hangar/ruin walls
+          _camRayOrigin.set(droneState.position.x, droneState.position.y + 0.25, droneState.position.z);
+          _camRayDir.subVectors(_camDesiredPos, _camRayOrigin);
+          const camDist = _camRayDir.length();
+          if (camDist > 0.2 && world.environmentColliders.length > 0) {
+            _camRayDir.divideScalar(camDist);
+            _camRaycaster.set(_camRayOrigin, _camRayDir);
+            _camRaycaster.far = camDist;
+            const hits = _camRaycaster.intersectObjects(world.environmentColliders, false);
+            if (hits.length > 0) {
+              const safeDist = Math.max(0.9, hits[0].distance - 0.35);
+              _camDesiredPos.copy(_camRayOrigin).addScaledVector(_camRayDir, safeDist);
+            }
           }
 
           camera.position.lerp(_camDesiredPos, 1 - Math.exp(-8.5 * dt));
@@ -419,6 +463,14 @@ export function DroneCanvas(props: SimBridgeProps) {
             camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
             camera.updateProjectionMatrix();
           }
+        }
+
+        // Keep directional shadow frustum anchored around the active sector (quantized to 4m to avoid shimmer)
+        if (!isSoftwareGl) {
+          const sx = Math.round(droneState.position.x / 4) * 4;
+          const sz = Math.round(droneState.position.z / 4) * 4;
+          world.sunLight.target.position.set(sx, 0, sz);
+          world.sunLight.position.copy(world.sunDirection).multiplyScalar(140).add(world.sunLight.target.position);
         }
 
         // Decaying trauma shake on impact/gate

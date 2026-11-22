@@ -9,6 +9,7 @@ export type MissionId =
   | 'gate_circuit'
   | 'nose_in_orbit'
   | 'precision_landing'
+  | 'structure_slalom'
   | 'free_flight';
 
 export interface StickInput {
@@ -52,6 +53,7 @@ export interface PhysicsConfig {
   flightMode: FlightMode;
   windEnabled: boolean;
   windTimeSec: number;
+  turbineAngle?: number;
 }
 
 export interface DroneTelemetry {
@@ -78,6 +80,7 @@ export interface GatePoint {
   z: number;
   radius: number;
   yaw: number;
+  noPylons?: boolean;
 }
 
 export interface MissionDefinition {

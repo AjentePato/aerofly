@@ -1,3 +1,4 @@
+import { buildWorldStructures, buildWorldTrees, type BoxCollider, type TreeCollider } from './structures';
 import type {
   DronePhysicsState,
   DroneTelemetry,
@@ -7,8 +8,15 @@ import type {
   Vec3,
 } from './types';
 
-export const WORLD_RADIUS = 148;
+export const WORLD_RADIUS = 360;
 export const DRONE_SKID_HEIGHT = 0.22;
+
+export const LAKE_AREA = {
+  x: 148,
+  z: -32,
+  waterRadius: 54,
+  waterLevelY: -1.6,
+};
 
 export interface LandingPlatform {
   x: number;
@@ -38,37 +46,91 @@ export const RADIO_TOWER = {
   height: 28,
 };
 
+export const WIND_TURBINES: ReadonlyArray<{ x: number; z: number; yaw: number; mastHeight: number }> = [
+  { x: 195, z: -125, yaw: -Math.PI * 0.35, mastHeight: 28 },
+  { x: 215, z: 45, yaw: -Math.PI * 0.35, mastHeight: 28 },
+  { x: -45, z: -210, yaw: -Math.PI * 0.35, mastHeight: 28 },
+  { x: 85, z: -225, yaw: -Math.PI * 0.35, mastHeight: 28 },
+];
+
 /**
  * Deterministic open-world terrain elevation at (x, z).
- * Central airfield (r < 34m) is graded flat at y = 0 for safe takeoff/landing.
+ * Central airfield (r < 48m) is graded flat at y = 0 for safe takeoff/landing.
+ * Structure pads are smoothly leveled so doorways & tunnels sit flush.
  * Lake basin in NE quadrant dips below water level (-1.6m).
- * Outer perimeter (r > 125m) rises smoothly into natural coastal mountains.
+ * Outer perimeter (r > 320m) rises smoothly into natural mountain ridges.
  */
 export function groundHeightAt(x: number, z: number): number {
   const r = Math.hypot(x, z);
 
-  // Rolling gentle hills beyond the flat airfield
-  const hillMask = smoothstep(32, 62, r);
+  // Rolling broad hills beyond the expanded central airfield
+  const hillMask = smoothstep(46, 86, r);
   const hills =
-    (Math.sin(x * 0.038) * Math.cos(z * 0.034) * 3.8 +
-      Math.sin((x + z) * 0.022) * 2.4 +
-      Math.cos(x * 0.075 - z * 0.06) * 1.1) *
+    (Math.sin(x * 0.024) * Math.cos(z * 0.022) * 5.2 +
+      Math.sin((x + z) * 0.014) * 3.2 +
+      Math.cos(x * 0.052 - z * 0.044) * 1.4) *
     hillMask;
 
-  // Lake depression in the East/Northeast valley (centered around x=66, z=-10)
-  const lakeDist = Math.hypot(x - 66, z + 10);
-  const lakeDip = (1 - smoothstep(14, 34, lakeDist)) * -4.2;
+  // Expanded Lake depression in the NE valley (centered around x=148, z=-32)
+  const lakeDist = Math.hypot(x - LAKE_AREA.x, z - LAKE_AREA.z);
+  const lakeDip = (1 - smoothstep(26, 64, lakeDist)) * -4.6;
+  const lakeClear = smoothstep(42, 66, lakeDist);
 
-  // Elevated pad mound blend
-  const padDist = Math.hypot(x - ELEVATED_PAD.x, z - ELEVATED_PAD.z);
-  const padClear = smoothstep(7, 14, padDist);
+  // Smooth plateau masks around training pads & pass-through architectural zones
+  // Inner flat radii exceed each structure's diagonal half-extent + terrain vertex spacing (~8m)
+  const padClear = smoothstep(10, 18, Math.hypot(x - ELEVATED_PAD.x, z - ELEVATED_PAD.z));
+  const hangarClear = smoothstep(27, 40, Math.hypot(x - 96, z - 68));
+  const containerClear = smoothstep(25, 38, Math.hypot(x - 138, z - 105));
+  const silosClear = smoothstep(18, 28, Math.hypot(x - 82, z - 125));
+  const ruinsClear = smoothstep(26, 39, Math.hypot(x + 145, z - 122));
+  const aqueductClear = smoothstep(40, 54, Math.hypot(x + 95, z - 78));
+  const house1Clear = smoothstep(18, 28, Math.hypot(x + 82, z + 48));
+  const house2Clear = smoothstep(16, 26, Math.hypot(x + 112, z + 68));
+  const house3Clear = smoothstep(16, 26, Math.hypot(x + 135, z + 45));
+  const barn1Clear = smoothstep(18, 28, Math.hypot(x + 96, z + 102));
+  const barn2Clear = smoothstep(18, 28, Math.hypot(x + 55, z - 118));
+  const bunkerClear = smoothstep(20, 32, Math.hypot(x - 24, z + 175));
 
-  // Natural mountain perimeter ridge beyond r = 122m
-  const ridgeMask = smoothstep(118, 165, r);
-  const ridgeNoise = 1 + 0.25 * Math.sin(Math.atan2(z, x) * 7) + 0.15 * Math.cos(Math.atan2(z, x) * 13);
-  const mountain = ridgeMask * 26 * ridgeNoise;
+  const zoneMask =
+    lakeClear *
+    padClear *
+    hangarClear *
+    containerClear *
+    silosClear *
+    ruinsClear *
+    aqueductClear *
+    house1Clear *
+    house2Clear *
+    house3Clear *
+    barn1Clear *
+    barn2Clear *
+    bunkerClear;
 
-  return Math.max(-3.6, (hills + lakeDip) * padClear + mountain);
+  // Natural mountain perimeter ridge beyond r = 320m
+  const ridgeMask = smoothstep(315, 425, r);
+  const angle = Math.atan2(z, x);
+  const ridgeNoise = 1 + 0.28 * Math.sin(angle * 7) + 0.16 * Math.cos(angle * 13);
+  const mountain = ridgeMask * 44 * ridgeNoise;
+
+  return Math.max(-4.0, hills * zoneMask + lakeDip + mountain);
+}
+
+const BUILT_WORLD_STRUCTURES = buildWorldStructures(groundHeightAt);
+const SOLID_STRUCTURE_BOXES: BoxCollider[] = BUILT_WORLD_STRUCTURES.parts.filter((p) => p.solid);
+const WORLD_TREES: TreeCollider[] = buildWorldTrees(
+  groundHeightAt,
+  LAKE_AREA,
+  ELEVATED_PAD,
+  RADIO_TOWER,
+  BUILT_WORLD_STRUCTURES.anchors
+);
+
+export function getSolidStructureBoxes(): readonly BoxCollider[] {
+  return SOLID_STRUCTURE_BOXES;
+}
+
+export function getWorldTrees(): readonly TreeCollider[] {
+  return WORLD_TREES;
 }
 
 /**
@@ -238,7 +300,12 @@ export function stepDronePhysics(
 
     next.pitch += (targetPitch - next.pitch) * tiltAlpha;
     next.roll += (targetRoll - next.roll) * tiltAlpha;
-    next.yaw += -yawIn * maxYawRate * dt;
+
+    // Smooth yaw inertia & damping so Q/E turns accelerate and settle fluidly
+    const targetYawRate = next.onGround && throttleIn <= -0.85 ? 0 : -yawIn * maxYawRate;
+    const yawLambda = isNormal ? 11.5 : 14.0;
+    next.angVel.y += (targetYawRate - next.angVel.y) * (1 - Math.exp(-yawLambda * dt));
+    next.yaw += next.angVel.y * dt;
 
     // Vertical velocity target with altitude hold around deadzone
     const thrDead = applyDeadzoneAndExpo(throttleIn, 0.08, 0.2);
@@ -318,6 +385,321 @@ export function stepDronePhysics(
     }
   }
 
+  // Wind turbines: tapered mast + nacelle + 3 live spinning rotor blades
+  const rotorAngle = config.turbineAngle ?? 0;
+  for (let t = 0; t < WIND_TURBINES.length; t++) {
+    const wt = WIND_TURBINES[t];
+    const dx = next.position.x - wt.x;
+    const dz = next.position.z - wt.z;
+    if (Math.abs(dx) > 15 || Math.abs(dz) > 15) continue;
+
+    const baseY = groundHeightAt(wt.x, wt.z);
+    const ly = next.position.y - baseY;
+    if (ly < -0.5 || ly > wt.mastHeight + 13) continue;
+
+    const c = Math.cos(wt.yaw);
+    const s = Math.sin(wt.yaw);
+    const lx = dx * c - dz * s;
+    const lz = dx * s + dz * c;
+
+    // 1. Mast cylinder (y = 0..28m, radius tapers 0.96 -> 0.48)
+    if (ly >= -0.3 && ly <= wt.mastHeight + 0.5) {
+      const mastR = 0.96 - clamp(ly / wt.mastHeight, 0, 1) * 0.48;
+      const horizD = Math.hypot(lx, lz);
+      if (horizD < mastR + 0.38) {
+        const impactSpeed = Math.hypot(next.velocity.x, next.velocity.z);
+        if (impactSpeed > 8.5) {
+          next.crashed = true;
+          next.motorPower = 0;
+        } else {
+          const inv = 1 / Math.max(horizD, 0.01);
+          const nLocalX = lx * inv;
+          const nLocalZ = lz * inv;
+          const push = mastR + 0.42 - horizD;
+          const nWorldX = nLocalX * c + nLocalZ * s;
+          const nWorldZ = -nLocalX * s + nLocalZ * c;
+          next.position.x += nWorldX * push;
+          next.position.z += nWorldZ * push;
+          next.velocity.x *= -0.35;
+          next.velocity.z *= -0.35;
+        }
+      }
+    }
+
+    // 2. Nacelle box (local center (0, 28.2, 0.5), hx=0.8, hy=0.8, hz=1.8)
+    const nacDx = lx;
+    const nacDy = ly - 28.2;
+    const nacDz = lz - 0.5;
+    const clX = clamp(nacDx, -0.8, 0.8);
+    const clY = clamp(nacDy, -0.8, 0.8);
+    const clZ = clamp(nacDz, -1.8, 1.8);
+    const nDistSq = (nacDx - clX) ** 2 + (nacDy - clY) ** 2 + (nacDz - clZ) ** 2;
+    if (nDistSq < 0.36 * 0.36) {
+      const impactSpeed = Math.hypot(next.velocity.x, next.velocity.y, next.velocity.z);
+      if (impactSpeed > 8.5) {
+        next.crashed = true;
+        next.motorPower = 0;
+      } else {
+        const dist = Math.max(Math.sqrt(nDistSq), 0.01);
+        const pen = 0.38 - dist;
+        const nlx = (nacDx - clX) / dist;
+        const nly = (nacDy - clY) / dist;
+        const nlz = (nacDz - clZ) / dist;
+        next.position.x += (nlx * c + nlz * s) * pen;
+        next.position.y += nly * pen;
+        next.position.z += (-nlx * s + nlz * c) * pen;
+        next.velocity.x *= -0.35;
+        next.velocity.y *= -0.35;
+        next.velocity.z *= -0.35;
+      }
+    }
+
+    // 3. Spinning 3 rotor blades at rotor hub (0, 28.2, 2.4)
+    const relZ = lz - 2.4;
+    const relY = ly - 28.2;
+    if (Math.abs(relZ) < 0.58 && lx * lx + relY * relY < 12.2 * 12.2) {
+      for (let b = 0; b < 3; b++) {
+        const phi = rotorAngle + (b * Math.PI * 2) / 3;
+        const bx = -Math.sin(phi);
+        const by = Math.cos(phi);
+        const proj = clamp(lx * bx + relY * by, 0.5, 11.65);
+        const dist = Math.hypot(lx - bx * proj, relY - by * proj, relZ);
+        if (dist < 0.62) {
+          // Moving blade strike causes crash!
+          next.crashed = true;
+          next.motorPower = 0;
+          break;
+        }
+      }
+    }
+  }
+
+  // Pine trees: real collisions against wooden trunks & conical pine foliage
+  const droneRadius = 0.36;
+  for (let i = 0; i < WORLD_TREES.length; i++) {
+    const tree = WORLD_TREES[i];
+    const dx = next.position.x - tree.x;
+    const dz = next.position.z - tree.z;
+    if (Math.abs(dx) > 3.2 || Math.abs(dz) > 3.2) continue;
+
+    const ly = next.position.y - tree.baseY;
+    const maxTreeH = 8.0 * tree.scale + 0.5;
+    if (ly < -0.4 || ly > maxTreeH) continue;
+
+    const horizD = Math.hypot(dx, dz);
+
+    // 1. Trunk cylinder (local y in [0, 2.8*scale], radius tapers 0.38 -> 0.24)
+    const trunkTop = 2.8 * tree.scale;
+    if (ly >= -0.3 && ly <= trunkTop + 0.2) {
+      const t = clamp(ly / trunkTop, 0, 1);
+      const trunkR = (0.38 - 0.14 * t) * tree.scale;
+      if (horizD < trunkR + droneRadius) {
+        const intoTrunk =
+          horizD > 1e-4 ? -(next.velocity.x * (dx / horizD) + next.velocity.z * (dz / horizD)) : 0;
+        if (intoTrunk > 7.5 || Math.hypot(next.velocity.x, next.velocity.z) > 8.5) {
+          next.crashed = true;
+          next.motorPower = 0;
+        } else {
+          const inv = 1 / Math.max(horizD, 0.01);
+          const nx = dx * inv;
+          const nz = dz * inv;
+          const push = trunkR + droneRadius + 0.03 - horizD;
+          next.position.x += nx * push;
+          next.position.z += nz * push;
+          if (intoTrunk > 0) {
+            const bounce = 1.35 * intoTrunk;
+            next.velocity.x += nx * bounce;
+            next.velocity.z += nz * bounce;
+          }
+        }
+      }
+    }
+
+    // 2. Foliage cone (bottom y0 = 2.2*scale, radius R0 = 2.1*scale -> apex y1 = 8.0*scale, radius 0)
+    const y0 = 2.2 * tree.scale;
+    const y1 = 8.0 * tree.scale;
+    const R0 = 2.1 * tree.scale;
+    const coneH = y1 - y0;
+    if (ly >= y0 - droneRadius && ly <= y1 + droneRadius && horizD <= R0 + droneRadius) {
+      // Closest point on 2D revolved cone cross-section (bottom segment + sloped side segment)
+      const botR = clamp(horizD, 0, R0);
+      const botDistSq = (horizD - botR) ** 2 + (ly - y0) ** 2;
+
+      const sideT = clamp(((horizD - R0) * -R0 + (ly - y0) * coneH) / (R0 * R0 + coneH * coneH), 0, 1);
+      const sideR = R0 * (1 - sideT);
+      const sideY = y0 + coneH * sideT;
+      const sideDistSq = (horizD - sideR) ** 2 + (ly - sideY) ** 2;
+
+      const insideCone = ly >= y0 && ly <= y1 && horizD <= R0 * ((y1 - ly) / coneH);
+
+      let nHoriz = 0;
+      let nY = 0;
+      let pen = 0;
+
+      if (insideCone) {
+        // Push out through nearest cone boundary (sloped side or flat underside)
+        const distBot = ly - y0;
+        const invSide = 1 / Math.hypot(coneH, R0);
+        const distSide = ((y1 - ly) * R0 - horizD * coneH) * invSide;
+        if (distBot < distSide) {
+          nHoriz = 0;
+          nY = -1;
+          pen = distBot + droneRadius;
+        } else {
+          nHoriz = coneH * invSide;
+          nY = R0 * invSide;
+          pen = distSide + droneRadius;
+        }
+      } else {
+        const useBottom = botDistSq <= sideDistSq;
+        const minDistSq = useBottom ? botDistSq : sideDistSq;
+        if (minDistSq < droneRadius * droneRadius) {
+          const dist = Math.sqrt(minDistSq);
+          pen = droneRadius - dist;
+          if (dist > 1e-5) {
+            const cr = useBottom ? botR : sideR;
+            const cy = useBottom ? y0 : sideY;
+            nHoriz = (horizD - cr) / dist;
+            nY = (ly - cy) / dist;
+          } else {
+            nHoriz = useBottom ? 0 : coneH / Math.hypot(coneH, R0);
+            nY = useBottom ? -1 : R0 / Math.hypot(coneH, R0);
+          }
+        }
+      }
+
+      if (pen > 0) {
+        const hInv = horizD > 1e-4 ? 1 / horizD : 0;
+        const nWorldX = hInv > 0 ? nHoriz * dx * hInv : 0;
+        const nWorldZ = hInv > 0 ? nHoriz * dz * hInv : 0;
+        const nWorldY = nY;
+
+        next.position.x += nWorldX * pen;
+        next.position.y += nWorldY * pen;
+        next.position.z += nWorldZ * pen;
+
+        const intoFoliage = -(
+          next.velocity.x * nWorldX +
+          next.velocity.y * nWorldY +
+          next.velocity.z * nWorldZ
+        );
+        if (intoFoliage > 7.5) {
+          next.crashed = true;
+          next.motorPower = 0;
+        } else if (intoFoliage > 0) {
+          const bounce = 1.28 * intoFoliage;
+          next.velocity.x += nWorldX * bounce;
+          next.velocity.y += nWorldY * bounce;
+          next.velocity.z += nWorldZ * bounce;
+        }
+      }
+    }
+  }
+
+  // Structural architectural collisions (walls, pillars, arches, roofs, bridge deck)
+  let landedOnStructure = false;
+  for (let i = 0; i < SOLID_STRUCTURE_BOXES.length; i++) {
+    const b = SOLID_STRUCTURE_BOXES[i];
+    // Fast bounding-sphere reject before rotation math
+    const dx = next.position.x - b.cx;
+    const dy = next.position.y - b.cy;
+    const dz = next.position.z - b.cz;
+    const maxR = b.hx + b.hz + b.hy + 1.0;
+    if (Math.abs(dx) > maxR || Math.abs(dy) > b.hy + 1.0 || Math.abs(dz) > maxR) continue;
+
+    // Transform into box local coordinates (inverse Y rotation)
+    const c = Math.cos(b.yaw);
+    const s = Math.sin(b.yaw);
+    const lx = dx * c - dz * s;
+    const lz = dx * s + dz * c;
+
+    const clampedX = clamp(lx, -b.hx, b.hx);
+    const clampedY = clamp(dy, -b.hy, b.hy);
+    const clampedZ = clamp(lz, -b.hz, b.hz);
+
+    const diffX = lx - clampedX;
+    const diffY = dy - clampedY;
+    const diffZ = lz - clampedZ;
+    const distSq = diffX * diffX + diffY * diffY + diffZ * diffZ;
+
+    if (distSq >= droneRadius * droneRadius) continue;
+
+    // Resolve penetration (handle both outside closest-point and deep interior overlap)
+    let nLocalX = 0;
+    let nLocalY = 0;
+    let nLocalZ = 0;
+    let pen = 0;
+
+    if (distSq > 1e-8) {
+      const dist = Math.sqrt(distSq);
+      pen = droneRadius - dist;
+      nLocalX = diffX / dist;
+      nLocalY = diffY / dist;
+      nLocalZ = diffZ / dist;
+    } else {
+      // Center is inside box: push out along nearest face
+      const px = b.hx - Math.abs(lx);
+      const py = b.hy - Math.abs(dy);
+      const pz = b.hz - Math.abs(lz);
+      if (py <= px && py <= pz) {
+        nLocalY = dy >= 0 ? 1 : -1;
+        pen = py + droneRadius;
+      } else if (px <= pz) {
+        nLocalX = lx >= 0 ? 1 : -1;
+        pen = px + droneRadius;
+      } else {
+        nLocalZ = lz >= 0 ? 1 : -1;
+        pen = pz + droneRadius;
+      }
+    }
+
+    // Top-surface landing (roof, bridge deck, container top)
+    if (nLocalY > 0.72 && next.velocity.y <= 0.8) {
+      const vertImpact = -next.velocity.y;
+      const totalTilt = Math.hypot(next.pitch, next.roll);
+      if (vertImpact > 8.0 || totalTilt > 1.25) {
+        next.crashed = true;
+        next.motorPower = 0;
+      } else {
+        next.position.y = b.cy + b.hy + DRONE_SKID_HEIGHT;
+        next.velocity.y = Math.max(0, next.velocity.y);
+        const skidFriction = Math.exp(-10 * dt);
+        next.velocity.x *= skidFriction;
+        next.velocity.z *= skidFriction;
+        next.pitch *= Math.exp(-8 * dt);
+        next.roll *= Math.exp(-8 * dt);
+        next.angVel.x = 0;
+        next.angVel.z = 0;
+        landedOnStructure = true;
+      }
+      continue;
+    }
+
+    // Rotate local normal back to world space
+    const nWorldX = nLocalX * c + nLocalZ * s;
+    const nWorldY = nLocalY;
+    const nWorldZ = -nLocalX * s + nLocalZ * c;
+
+    next.position.x += nWorldX * pen;
+    next.position.y += nWorldY * pen;
+    next.position.z += nWorldZ * pen;
+
+    const intoWallSpeed = -(
+      next.velocity.x * nWorldX +
+      next.velocity.y * nWorldY +
+      next.velocity.z * nWorldZ
+    );
+    if (intoWallSpeed > 8.5) {
+      next.crashed = true;
+      next.motorPower = 0;
+    } else if (intoWallSpeed > 0) {
+      const bounce = 1.35 * intoWallSpeed;
+      next.velocity.x += nWorldX * bounce;
+      next.velocity.y += nWorldY * bounce;
+      next.velocity.z += nWorldZ * bounce;
+    }
+  }
+
   // Ground / Platform contact resolution
   const newFloorY = surfaceHeightAt(next.position.x, next.position.z, prev.position.y);
   const minDroneY = newFloorY + DRONE_SKID_HEIGHT;
@@ -348,14 +730,14 @@ export function stepDronePhysics(
       next.angVel.z = 0;
     }
   } else {
-    next.onGround = false;
+    next.onGround = landedOnStructure;
   }
 
-  // Water landing check (NE lake)
-  const lakeDist = Math.hypot(next.position.x - 66, next.position.z + 10);
-  if (lakeDist < 24 && next.position.y <= -1.45) {
+  // Water landing check (expanded NE lake)
+  const lakeDist = Math.hypot(next.position.x - LAKE_AREA.x, next.position.z - LAKE_AREA.z);
+  if (lakeDist < LAKE_AREA.waterRadius - 6 && next.position.y <= LAKE_AREA.waterLevelY + 0.15) {
     next.crashed = true;
-    next.position.y = -1.45;
+    next.position.y = LAKE_AREA.waterLevelY + 0.15;
     next.velocity = { x: 0, y: 0, z: 0 };
     next.motorPower = 0;
   }
