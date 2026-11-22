@@ -667,6 +667,97 @@ export function distToSegment2D(px: number, pz: number, ax: number, az: number, 
   return Math.hypot(px - (ax + t * vx), pz - (az + t * vz));
 }
 
+export function isPointNearStructureBox2D(
+  px: number,
+  pz: number,
+  box: BoxCollider,
+  margin: number
+): boolean {
+  const dx = px - box.cx;
+  const dz = pz - box.cz;
+  const c = Math.cos(box.yaw);
+  const s = Math.sin(box.yaw);
+  const lx = dx * c - dz * s;
+  const lz = dx * s + dz * c;
+  return Math.abs(lx) <= box.hx + margin && Math.abs(lz) <= box.hz + margin;
+}
+
+export interface RockPlacement {
+  x: number;
+  y: number;
+  z: number;
+  scale: number;
+  idx: number;
+}
+
+/**
+ * Generates deterministic decorative boulders across foothills & open terrain,
+ * strictly excluding every structure bounding box (houses, barns, ruins, hangar, tunnel),
+ * lakes, roads, helipads, towers, and wind turbines.
+ */
+export function buildWorldRocks(
+  getGroundY: (x: number, z: number) => number,
+  parts: readonly BoxCollider[],
+  anchors: readonly StructureAnchor[],
+  lakeArea: { x: number; z: number; waterRadius: number },
+  elevatedPad: { x: number; z: number },
+  radioTower: { x: number; z: number },
+  windTurbines: ReadonlyArray<{ x: number; z: number }>
+): RockPlacement[] {
+  const rocks: RockPlacement[] = [];
+  for (let i = 0; i < 140; i++) {
+    const a = i * 1.93;
+    const r = 64 + ((i * 31) % 260);
+    const rx = Math.cos(a) * r;
+    const rz = Math.sin(a) * r;
+    const s = 0.7 + ((i * 11) % 14) * 0.14;
+    const rockFootprint = 1.45 * s + 3.2;
+
+    if (Math.hypot(rx - lakeArea.x, rz - lakeArea.z) < lakeArea.waterRadius + 4) continue;
+    if (Math.hypot(rx - elevatedPad.x, rz - elevatedPad.z) < 10) continue;
+    if (Math.hypot(rx - radioTower.x, rz - radioTower.z) < 9) continue;
+
+    let blocked = false;
+    for (const wt of windTurbines) {
+      if (Math.hypot(rx - wt.x, rz - wt.z) < 8) {
+        blocked = true;
+        break;
+      }
+    }
+    if (blocked) continue;
+
+    for (const anc of anchors) {
+      if (Math.hypot(rx - anc.x, rz - anc.z) < anc.radius) {
+        blocked = true;
+        break;
+      }
+    }
+    if (blocked) continue;
+
+    for (const box of parts) {
+      if (isPointNearStructureBox2D(rx, rz, box, rockFootprint)) {
+        blocked = true;
+        break;
+      }
+    }
+    if (blocked) continue;
+
+    for (const [ax, az, bx, bz] of ROAD_SEGMENTS) {
+      if (distToSegment2D(rx, rz, ax, az, bx, bz) < 5.8) {
+        blocked = true;
+        break;
+      }
+    }
+    if (blocked) continue;
+
+    const gy = getGroundY(rx, rz);
+    if (gy < -0.5) continue;
+
+    rocks.push({ x: rx, y: gy + 0.3, z: rz, scale: s, idx: i });
+  }
+  return rocks;
+}
+
 /**
  * Generates deterministic pine tree transforms & collision bounds synchronized
  * between Three.js instanced rendering and the physics engine.
@@ -676,7 +767,8 @@ export function buildWorldTrees(
   lakeArea: { x: number; z: number; waterRadius: number },
   elevatedPad: { x: number; z: number },
   radioTower: { x: number; z: number },
-  anchors: readonly StructureAnchor[]
+  anchors: readonly StructureAnchor[],
+  parts: readonly BoxCollider[] = []
 ): TreeCollider[] {
   const trees: TreeCollider[] = [];
   for (let i = 0; i < 420; i++) {
@@ -696,6 +788,14 @@ export function buildWorldTrees(
       if (Math.hypot(tx - anc.x, tz - anc.z) < anc.radius) {
         insideStructureZone = true;
         break;
+      }
+    }
+    if (!insideStructureZone && parts.length > 0) {
+      for (const box of parts) {
+        if (isPointNearStructureBox2D(tx, tz, box, 4.5)) {
+          insideStructureZone = true;
+          break;
+        }
       }
     }
     if (insideStructureZone) continue;

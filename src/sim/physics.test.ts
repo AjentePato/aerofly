@@ -5,12 +5,13 @@ import {
   WORLD_RADIUS,
   computeBodyUpVector,
   createInitialDroneState,
+  getWorldRocks,
   getWorldTrees,
   groundHeightAt,
   stepDronePhysics,
   surfaceHeightAt,
 } from './physics';
-import { STRUCTURE_SLAB_ELEVATION, buildWorldStructures } from './structures';
+import { STRUCTURE_SLAB_ELEVATION, buildWorldStructures, isPointNearStructureBox2D } from './structures';
 import { MISSIONS, getMissionById, createInitialMissionProgress, evaluateMissionStep } from './missions';
 import { computeFloatingStickOrigin, computeFloatingStickValue } from './floatingStick';
 import {
@@ -78,24 +79,24 @@ test('positive throttle climbs and forward pitch moves toward -Z', () => {
   assert.ok(state.position.z < startZ - 2.0, `Expected forward (-Z) travel, got ${state.position.z}`);
 });
 
-test('acro mode rotates continuously without auto-leveling', () => {
+test('sport mode tilts farther than normal mode and auto-levels smoothly on release', () => {
   let state = createInitialDroneState();
   state.position.y = 20;
   state.onGround = false;
 
-  const acroConfig: PhysicsConfig = { flightMode: 'acro', windEnabled: false, windTimeSec: 0 };
-  const pitchCmd: StickInput = { throttle: 0.1, yaw: 0, pitch: 0.6, roll: 0 };
-  for (let i = 0; i < 20; i++) {
-    state = stepDronePhysics(state, pitchCmd, acroConfig, 1 / 60);
+  const sportConfig: PhysicsConfig = { flightMode: 'sport', windEnabled: false, windTimeSec: 0 };
+  const pitchCmd: StickInput = { throttle: 0, yaw: 0, pitch: 0.9, roll: 0 };
+  for (let i = 0; i < 30; i++) {
+    state = stepDronePhysics(state, pitchCmd, sportConfig, 1 / 60);
   }
-  const tiltedPitch = state.pitch;
-  assert.ok(Math.abs(tiltedPitch) > 0.3, 'Expected significant pitch tilt in Acro mode');
+  const tiltedPitch = Math.abs(state.pitch);
+  assert.ok(tiltedPitch > 0.52, `Expected Sport mode steep pitch tilt > 0.52 rad, got ${tiltedPitch}`);
 
-  // Release stick: Acro holds attitude instead of snapping back to 0
-  for (let i = 0; i < 15; i++) {
-    state = stepDronePhysics(state, neutralInput, acroConfig, 1 / 60);
+  // Release stick: Sport auto-levels smoothly back toward horizontal
+  for (let i = 0; i < 35; i++) {
+    state = stepDronePhysics(state, neutralInput, sportConfig, 1 / 60);
   }
-  assert.ok(Math.abs(state.pitch) > 0.25, 'Acro should not auto-level when stick is centered');
+  assert.ok(Math.abs(state.pitch) < 0.05, 'Sport mode should auto-level cleanly when stick returns to center');
 });
 
 test('body up vector tilts forward (-Z) when pitch is negative', () => {
@@ -556,5 +557,33 @@ test('stick change detector always triggers on zero-release and prefers WebRTC P
   assert.equal(pickRelayTransport(null, 1), 'ws');
   assert.equal(pickRelayTransport('closed', 3), 'none');
 });
+
+test('no decorative rock or tree overlaps any building, barn, house, or structure interior', () => {
+  const { parts } = buildWorldStructures(groundHeightAt);
+  const rocks = getWorldRocks();
+  const trees = getWorldTrees();
+  assert.ok(rocks.length >= 40, 'Expected decorative world boulders');
+
+  for (const rock of rocks) {
+    for (const box of parts) {
+      assert.equal(
+        isPointNearStructureBox2D(rock.x, rock.z, box, 1.45 * rock.scale + 2.5),
+        false,
+        `Rock at (${rock.x.toFixed(1)}, ${rock.z.toFixed(1)}) intersects structure [${box.material}] at (${box.cx.toFixed(1)}, ${box.cz.toFixed(1)})`
+      );
+    }
+  }
+
+  for (const tree of trees) {
+    for (const box of parts) {
+      assert.equal(
+        isPointNearStructureBox2D(tree.x, tree.z, box, 3.5),
+        false,
+        `Tree at (${tree.x.toFixed(1)}, ${tree.z.toFixed(1)}) intersects structure [${box.material}] at (${box.cx.toFixed(1)}, ${box.cz.toFixed(1)})`
+      );
+    }
+  }
+});
+
 
 

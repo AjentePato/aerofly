@@ -1,4 +1,4 @@
-import { buildWorldStructures, buildWorldTrees, type BoxCollider, type TreeCollider } from './structures';
+import { buildWorldRocks, buildWorldStructures, buildWorldTrees, type BoxCollider, type RockPlacement, type TreeCollider } from './structures';
 import type {
   DronePhysicsState,
   DroneTelemetry,
@@ -122,7 +122,17 @@ const WORLD_TREES: TreeCollider[] = buildWorldTrees(
   LAKE_AREA,
   ELEVATED_PAD,
   RADIO_TOWER,
-  BUILT_WORLD_STRUCTURES.anchors
+  BUILT_WORLD_STRUCTURES.anchors,
+  BUILT_WORLD_STRUCTURES.parts
+);
+const WORLD_ROCKS: RockPlacement[] = buildWorldRocks(
+  groundHeightAt,
+  BUILT_WORLD_STRUCTURES.parts,
+  BUILT_WORLD_STRUCTURES.anchors,
+  LAKE_AREA,
+  ELEVATED_PAD,
+  RADIO_TOWER,
+  WIND_TURBINES
 );
 
 export function getSolidStructureBoxes(): readonly BoxCollider[] {
@@ -131,6 +141,10 @@ export function getSolidStructureBoxes(): readonly BoxCollider[] {
 
 export function getWorldTrees(): readonly TreeCollider[] {
   return WORLD_TREES;
+}
+
+export function getWorldRocks(): readonly RockPlacement[] {
+  return WORLD_ROCKS;
 }
 
 /**
@@ -242,49 +256,6 @@ export function stepDronePhysics(
     next.velocity.y -= gravity * dt;
     next.velocity.x *= Math.exp(-1.5 * dt);
     next.velocity.z *= Math.exp(-1.5 * dt);
-  } else if (config.flightMode === 'acro') {
-    // ACRO / FPV RATE MODE: Sticks control angular rates; no auto-leveling!
-    const maxPitchRate = 4.2; // rad/s (~240 deg/s)
-    const maxRollRate = 4.8;
-    const maxYawRate = 3.6;
-
-    const targetRateX = -pitchIn * maxPitchRate;
-    const targetRateZ = -rollIn * maxRollRate;
-    const targetRateY = -yawIn * maxYawRate;
-
-    const rateResponse = 1 - Math.exp(-14 * dt);
-    next.angVel.x += (targetRateX - next.angVel.x) * rateResponse;
-    next.angVel.y += (targetRateY - next.angVel.y) * rateResponse;
-    next.angVel.z += (targetRateZ - next.angVel.z) * rateResponse;
-
-    if (!next.onGround || throttleIn > -0.85) {
-      next.yaw += next.angVel.y * dt;
-      next.pitch = clamp(next.pitch + next.angVel.x * dt, -Math.PI * 0.95, Math.PI * 0.95);
-      next.roll = clamp(next.roll + next.angVel.z * dt, -Math.PI * 0.95, Math.PI * 0.95);
-    }
-
-    // Throttle maps -1..+1 -> 0..1 thrust (hover ~0.46)
-    const targetThrustNorm = clamp((throttleIn + 1) * 0.5, 0, 1);
-    next.motorPower += (targetThrustNorm - next.motorPower) * (1 - Math.exp(-16 * dt));
-
-    // Max thrust-to-weight ratio ~2.2g for crisp FPV climbs
-    const groundEffect = 1 + 0.14 * Math.exp(-agl * 1.8);
-    const thrustAccel = next.motorPower * 21.5 * groundEffect;
-
-    const upVec = computeBodyUpVector(next.yaw, next.pitch, next.roll);
-    const ax = upVec.x * thrustAccel;
-    const ay = upVec.y * thrustAccel - gravity;
-    const az = upVec.z * thrustAccel;
-
-    // Quadratic-style air drag relative to wind
-    const relVx = next.velocity.x - wind.x;
-    const relVy = next.velocity.y - wind.y;
-    const relVz = next.velocity.z - wind.z;
-    const drag = 0.28;
-
-    next.velocity.x += (ax - relVx * drag) * dt;
-    next.velocity.y += (ay - relVy * drag * 0.85) * dt;
-    next.velocity.z += (az - relVz * drag) * dt;
   } else {
     // NORMAL (GPS Stabilized) or SPORT (Angle Mode)
     const isNormal = config.flightMode === 'normal';

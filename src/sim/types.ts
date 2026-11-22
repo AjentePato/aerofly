@@ -1,6 +1,6 @@
-export type FlightMode = 'normal' | 'sport' | 'acro';
+export type FlightMode = 'normal' | 'sport';
 
-export type CameraMode = 'chase' | 'fpv' | 'los';
+export type CameraMode = 'chase' | 'fpv';
 
 export type GamePhase = 'title' | 'playing' | 'paused' | 'gameover';
 
@@ -36,7 +36,7 @@ export interface DronePhysicsState {
   yaw: number;
   pitch: number;
   roll: number;
-  /** Body angular velocities in rad/s (used primarily in Acro rate mode) */
+  /** Body angular velocities in rad/s */
   angVel: Vec3;
   /** Current normalized motor throttle output 0..1 */
   motorPower: number;

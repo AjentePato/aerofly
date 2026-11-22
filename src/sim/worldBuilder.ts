@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { ELEVATED_PAD, LAKE_AREA, MAIN_HELIPAD, RADIO_TOWER, WIND_TURBINES, getWorldTrees, groundHeightAt } from './physics';
+import { ELEVATED_PAD, LAKE_AREA, MAIN_HELIPAD, RADIO_TOWER, WIND_TURBINES, getWorldRocks, getWorldTrees, groundHeightAt } from './physics';
 import { ROAD_SEGMENTS, buildWorldStructures, distToSegment2D, type StructureMaterialKey } from './structures';
 import type { GatePoint, MissionDefinition, MissionProgress } from './types';
 
@@ -19,7 +19,6 @@ export interface WorldHandles {
   landingBeaconMesh: THREE.Mesh;
   gateGroup: THREE.Group;
   gateVisuals: GateVisual[];
-  losAnchor: THREE.Vector3;
   sunLight: THREE.DirectionalLight;
   sunDirection: THREE.Vector3;
   environmentColliders: THREE.Object3D[];
@@ -479,7 +478,7 @@ export function buildTrainingWorld(
     scene.add(tGroup);
   }
 
-  // 10. Pilot Observation Stand & Training Hangar (Solo LOS Camera Anchor)
+  // 10. Pilot Observation Stand & Training Hangar
   const standPos = { x: -16, z: 16 };
   const standBaseY = groundHeightAt(standPos.x, standPos.z);
   const hangarGroup = new THREE.Group();
@@ -522,8 +521,6 @@ export function buildTrainingWorld(
   roof.castShadow = true;
   hangarGroup.add(roof);
   scene.add(hangarGroup);
-
-  const losAnchor = new THREE.Vector3(standPos.x + 2.2, standBaseY + 2.1, standPos.z - 2.2);
 
   // 10b. Pass-Through Architectural Structures (Abandoned Houses, Ruins, Hangar, Containers, Bridge)
   const masonryBump = createMasonryBumpTexture();
@@ -643,33 +640,16 @@ export function buildTrainingWorld(
   scene.add(trunkInst);
   scene.add(foliageInst);
 
-  // Instanced Boulders around foothills & lake shore (avoiding interiors)
+  // Instanced Boulders around foothills & lake shore (strictly outside all structures & roads)
   const rockGeo = new THREE.DodecahedronGeometry(1.15, 0);
   const rockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0.05 });
-  const rockPositions: Array<{ x: number; z: number; s: number; idx: number }> = [];
-  for (let i = 0; i < 140; i++) {
-    const a = i * 1.93;
-    const r = 64 + ((i * 31) % 260);
-    const rx = Math.cos(a) * r;
-    const rz = Math.sin(a) * r;
-    let blocked = false;
-    for (const anc of structureAnchors) {
-      if (Math.hypot(rx - anc.x, rz - anc.z) < anc.radius) {
-        blocked = true;
-        break;
-      }
-    }
-    if (blocked) continue;
-    const s = 0.7 + ((i * 11) % 14) * 0.14;
-    rockPositions.push({ x: rx, z: rz, s, idx: i });
-  }
+  const rockPositions = getWorldRocks();
   const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, rockPositions.length);
   rockInst.receiveShadow = true;
   rockPositions.forEach((rp, i) => {
-    const ry = groundHeightAt(rp.x, rp.z);
-    dummy.position.set(rp.x, ry + 0.3, rp.z);
+    dummy.position.set(rp.x, rp.y, rp.z);
     dummy.rotation.set(rp.idx * 0.5, rp.idx * 1.1, rp.idx * 0.3);
-    dummy.scale.set(rp.s * 1.25, rp.s * 0.78, rp.s);
+    dummy.scale.set(rp.scale * 1.25, rp.scale * 0.78, rp.scale);
     dummy.updateMatrix();
     rockInst.setMatrixAt(i, dummy.matrix);
     treeColor.setHSL(0.6, 0.06, 0.36 + (i % 4) * 0.05);
@@ -826,7 +806,6 @@ export function buildTrainingWorld(
     landingBeaconMesh,
     gateGroup,
     gateVisuals,
-    losAnchor,
     sunLight,
     sunDirection: sunVec,
     environmentColliders,

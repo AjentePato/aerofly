@@ -27,13 +27,11 @@ interface FlightHUDProps {
 const CAMERA_LABELS: Record<CameraMode, string> = {
   chase: 'Chase 3ª Pessoa',
   fpv: 'FPV Óculos',
-  los: 'Solo (LOS)',
 };
 
 const MODE_LABELS: Record<FlightMode, string> = {
   normal: 'GPS Estabilizado',
   sport: 'Sport',
-  acro: 'Acro FPV',
 };
 
 function StickMiniPreview({ x, y, label }: { x: number; y: number; label: string }) {
@@ -133,7 +131,7 @@ export function FlightHUD({
 
           {/* Quick Flight Mode Switcher */}
           <div className="mt-2.5 flex items-center gap-1" role="group" aria-label="Alternar modo de voo">
-            {(['normal', 'sport', 'acro'] as FlightMode[]).map((m, idx) => (
+            {(['normal', 'sport'] as FlightMode[]).map((m, idx) => (
               <button
                 key={m}
                 type="button"

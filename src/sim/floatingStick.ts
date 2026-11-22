@@ -11,7 +11,7 @@ export interface FloatingOrigin {
 /**
  * Computes the virtual joystick center when a finger touches down at (touchX, touchY).
  * In auto-centering mode, the exact touch point becomes (0, 0) so initial input is always neutral.
- * In stickyY mode (e.g. Acro throttle), the Y origin is shifted so the current throttle value
+ * In stickyY mode (fixed throttle), the Y origin is shifted so the current throttle value
  * is preserved seamlessly at the finger's initial Y position without a sudden jump.
  */
 export function computeFloatingStickOrigin(

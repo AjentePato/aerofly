@@ -26,6 +26,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: 'V1.4.2',
+    title: 'Remoção da Câmera Solo (LOS)',
+    summary:
+      'Simplificação da troca de câmeras para deixar apenas as visões Chase (3ª pessoa) e FPV (primeira pessoa).',
+    kind: 'fix',
+    changes: [
+      {
+        category: 'Correção',
+        text: 'Removido o modo de câmera fixa "Solo (LOS)", que apresentava falhas visuais e dificultava acompanhar o drone.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'Atalho [C], botão no celular e menu de pausa agora alternam diretamente entre Chase 3ª Pessoa e FPV Óculos.',
+      },
+    ],
+  },
+  {
     version: 'V1.4.1',
     title: 'Resposta Mais Rápida no Controle pelo Celular',
     summary:
@@ -181,7 +198,7 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
     changes: [
       {
         category: 'Novo',
-        text: 'Simulação realista de voo com três modos (Estabilizado GPS, Sport e Acro FPV) e opção de vento lateral.',
+        text: 'Simulação realista de voo com os modos Estabilizado (GPS) e Sport e opção de vento lateral.',
       },
       {
         category: 'Novo',

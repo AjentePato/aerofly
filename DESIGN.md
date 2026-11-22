@@ -18,7 +18,7 @@ Simulador 3D de voo e treinamento para drones quadricópteros construído com Re
 - `src/sim/worldBuilder.ts`: Construção da cena Three.js (terreno otimizado, lago, pistas, estruturas com raio de culling para raycast, vegetação, iluminação e visuais de missão).
 - `src/sim/droneMesh.ts`: Rig 3D do drone quadricóptero, hélices, gimbal estabilizado e sombra de contato.
 - `src/sim/audio.ts`: Síntese procedural de motores, portões e colisões via Web Audio API.
-- `src/components/DroneCanvas.tsx`: Loop WebGL/Three.js (`requestAnimationFrame` / `afterDraw` em software GL), amostragem unificada de teclado + celular + gamepad físico e câmeras (`chase`, `fpv`, `los`).
+- `src/components/DroneCanvas.tsx`: Loop WebGL/Three.js (`requestAnimationFrame` / `afterDraw` em software GL), amostragem unificada de teclado + celular + gamepad físico e câmeras (`chase`, `fpv`).
 - `src/components/TitleOverlay.tsx`: Tela inicial com seleção de missões, modo de voo, vento, pareamento celular, indicador discreto de versão ao lado do título e botão "Novidades!" no canto inferior direito.
 - `src/components/ChangelogModal.tsx`: Modal acessível exibindo a linha do tempo detalhada de versões com filtros.
 - `src/components/FlightHUD.tsx`: HUD de voo com objetivo da missão, troca rápida de modo, câmera/som/pausa, status de controle Xbox/DS4, visualizador ao vivo dos sticks Modo 2 e barra de telemetria.

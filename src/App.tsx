@@ -107,11 +107,11 @@ export default function App() {
 
   // Actions
   const cycleCamera = useCallback(() => {
-    setCameraMode((prev) => (prev === 'chase' ? 'fpv' : prev === 'fpv' ? 'los' : 'chase'));
+    setCameraMode((prev) => (prev === 'chase' ? 'fpv' : 'chase'));
   }, []);
 
   const cycleFlightMode = useCallback(() => {
-    setFlightMode((prev) => (prev === 'normal' ? 'sport' : prev === 'sport' ? 'acro' : 'normal'));
+    setFlightMode((prev) => (prev === 'normal' ? 'sport' : 'normal'));
   }, []);
 
   const handleStartFlight = useCallback(() => {

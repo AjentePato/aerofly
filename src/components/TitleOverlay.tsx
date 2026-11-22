@@ -23,7 +23,6 @@ interface TitleOverlayProps {
 const MODE_OPTIONS: Array<{ id: FlightMode; label: string; desc: string }> = [
   { id: 'normal', label: 'Estabilizado (GPS)', desc: 'Auto-nível + trava altitude (Iniciante)' },
   { id: 'sport', label: 'Sport', desc: 'Inclinação 45° + resposta ágil' },
-  { id: 'acro', label: 'Acro FPV', desc: 'Manual sem auto-nível (Avançado)' },
 ];
 
 export function TitleOverlay({
@@ -156,7 +155,7 @@ export function TitleOverlay({
               {windEnabled ? 'Vento Ligado' : 'Sem Vento'}
             </button>
           </div>
-          <div className="grid grid-cols-3 gap-1.5" role="group" aria-label="Modo de voo">
+          <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Modo de voo">
             {MODE_OPTIONS.map((opt) => {
               const active = flightMode === opt.id;
               return (

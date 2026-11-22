@@ -100,12 +100,11 @@ export function PauseModal({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <span className="block text-xs font-medium text-slate-300 mb-1.5">Modo de Voo</span>
-            <div className="grid grid-cols-3 gap-1">
+            <div className="grid grid-cols-2 gap-1">
               {(
                 [
                   ['normal', 'GPS'],
                   ['sport', 'Sport'],
-                  ['acro', 'Acro'],
                 ] as Array<[FlightMode, string]>
               ).map(([id, label]) => (
                 <button
@@ -126,12 +125,11 @@ export function PauseModal({
 
           <div>
             <span className="block text-xs font-medium text-slate-300 mb-1.5">Câmera</span>
-            <div className="grid grid-cols-3 gap-1">
+            <div className="grid grid-cols-2 gap-1">
               {(
                 [
                   ['chase', 'Chase'],
                   ['fpv', 'FPV'],
-                  ['los', 'Solo'],
                 ] as Array<[CameraMode, string]>
               ).map(([id, label]) => (
                 <button

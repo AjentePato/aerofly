@@ -647,7 +647,7 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
               : 'bg-slate-900 border-slate-700 text-slate-300'
           }`}
         >
-          {stickyThrottle ? 'Acelerador Fixo (Acro)' : 'Acelerador Auto-Centro (GPS)'}
+          {stickyThrottle ? 'Acelerador Fixo (Manual)' : 'Acelerador Auto-Centro (GPS)'}
         </button>
 
         <button

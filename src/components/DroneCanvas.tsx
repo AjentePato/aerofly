@@ -54,7 +54,6 @@ export interface SimBridgeProps {
 // Pre-allocated math helpers outside the 60Hz loop (zero GC)
 const _camTargetPos = new THREE.Vector3();
 const _camDesiredPos = new THREE.Vector3();
-const _camLookAt = new THREE.Vector3();
 const _forwardDir = new THREE.Vector3();
 const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _fpvWorldPos = new THREE.Vector3();
@@ -172,7 +171,6 @@ export function DroneCanvas(props: SimBridgeProps) {
         }
         if (code === 'Digit1') propsRef.current.onSelectFlightMode('normal');
         if (code === 'Digit2') propsRef.current.onSelectFlightMode('sport');
-        if (code === 'Digit3') propsRef.current.onSelectFlightMode('acro');
       } else if (propsRef.current.phase === 'paused' && (code === 'KeyP' || code === 'Escape')) {
         e.preventDefault();
         propsRef.current.onTogglePause();
@@ -436,7 +434,7 @@ export function DroneCanvas(props: SimBridgeProps) {
 
         // Smooth coordinated yaw-bank visual lean + gimbal pan lead when turning (Q/E)
         const targetYawBank =
-          crashTumble.active || cur.flightMode === 'acro' || droneState.onGround
+          crashTumble.active || droneState.onGround
             ? 0
             : Math.max(-0.22, Math.min(0.22, droneState.angVel.y * 0.085));
         visualYawBank += (targetYawBank - visualYawBank) * (1 - Math.exp(-10 * dt));
@@ -481,7 +479,7 @@ export function DroneCanvas(props: SimBridgeProps) {
         const speed = Math.hypot(droneState.velocity.x, droneState.velocity.y, droneState.velocity.z);
         audio.updateMotors(droneState.motorPower, droneState.armed && !droneState.crashed, speed);
 
-        // Camera Modes: Chase, FPV, Ground Line-of-Sight (LOS)
+        // Camera Modes: Chase, FPV
         if (cur.cameraMode === 'fpv') {
           droneRig.root.updateMatrixWorld(true);
           droneRig.fpvMount.getWorldPosition(_fpvWorldPos);
@@ -489,12 +487,7 @@ export function DroneCanvas(props: SimBridgeProps) {
 
           // FPV camera uptilt: level (-0.02 rad) when stationary/hovering, compensating upward as nose dips forward
           const forwardDip = Math.max(0, -droneState.pitch);
-          const fpvUptilt =
-            cur.flightMode === 'acro'
-              ? droneState.onGround
-                ? -0.02
-                : 0.24
-              : -0.02 + forwardDip * 0.88;
+          const fpvUptilt = -0.02 + forwardDip * 0.88;
           _fpvTiltEuler.set(fpvUptilt, yawLead * 0.35, 0, 'YXZ');
           _fpvTiltQuat.setFromEuler(_fpvTiltEuler);
 
@@ -506,17 +499,6 @@ export function DroneCanvas(props: SimBridgeProps) {
             camera.updateProjectionMatrix();
           }
           droneRig.root.visible = false;
-        } else if (cur.cameraMode === 'los') {
-          droneRig.root.visible = true;
-          camera.position.lerp(world.losAnchor, 1 - Math.exp(-6 * dt));
-          _camLookAt.set(droneState.position.x, droneState.position.y, droneState.position.z);
-          camera.lookAt(_camLookAt);
-          const dist = camera.position.distanceTo(_camLookAt);
-          const targetFov = Math.max(24, Math.min(60, 62 - dist * 0.35));
-          if (Math.abs(camera.fov - targetFov) > 0.1) {
-            camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-5 * dt));
-            camera.updateProjectionMatrix();
-          }
         } else {
           // Chase Cam: anchors heading and pulls back slightly during crash tumble so impact is clearly visible
           droneRig.root.visible = true;
