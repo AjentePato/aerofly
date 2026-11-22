@@ -4,6 +4,7 @@ import { TitleOverlay } from './components/TitleOverlay';
 import { FlightHUD } from './components/FlightHUD';
 import { OutcomeModal, PauseModal } from './components/Modals';
 import { PairingModal } from './components/PairingModal';
+import { ChangelogModal } from './components/ChangelogModal';
 import { MobileController } from './components/MobileController';
 import { MISSIONS, createInitialMissionProgress, getMissionById } from './sim/missions';
 import { readBrowserGamepad, type GamepadStatus } from './sim/gamepad';
@@ -71,6 +72,7 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [resetNonce, setResetNonce] = useState(0);
   const [showPairing, setShowPairing] = useState(false);
+  const [showChangelog, setShowChangelog] = useState(false);
 
   const [controllerCount, setControllerCount] = useState(0);
   const [gamepadStatus, setGamepadStatus] = useState<GamepadStatus>(() => readBrowserGamepad().status);
@@ -317,11 +319,13 @@ export default function App() {
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
           gamepadLabel={gamepadStatus.label}
+          modalOpen={showPairing || showChangelog}
           onSelectMission={handleSelectMission}
           onSelectFlightMode={setFlightMode}
           onToggleWind={() => setWindEnabled((w) => !w)}
           onStartFlight={handleStartFlight}
           onOpenPairing={() => setShowPairing(true)}
+          onOpenChangelog={() => setShowChangelog(true)}
         />
       )}
 
@@ -396,6 +400,8 @@ export default function App() {
           onClose={() => setShowPairing(false)}
         />
       )}
+
+      {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
     </main>
   );
 }

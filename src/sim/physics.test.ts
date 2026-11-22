@@ -21,6 +21,13 @@ import {
   rescaleStickAxis,
 } from './gamepad';
 import { CRASH_ANIMATION_DURATION_SEC, initCrashTumble, stepCrashTumble } from './crashAnimation';
+import {
+  CHANGELOG_ENTRIES,
+  GAME_VERSION,
+  filterChangelogEntries,
+  isPatchVersion,
+  isValidVersionFormat,
+} from './changelog';
 import type { PhysicsConfig, StickInput } from './types';
 
 const neutralInput: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
@@ -482,3 +489,28 @@ test('crash animation tumbles mid-air drone, breaks propellers, bounces on groun
   const floorY = surfaceHeightAt(drone.position.x, drone.position.z, drone.position.y);
   assert.ok(drone.position.y >= floorY + 0.14, 'Expected crashed drone never to sink below terrain');
 });
+
+test('changelog follows V1.X / V1.X.Y versioning rules and filters cleanly', () => {
+  assert.equal(GAME_VERSION, CHANGELOG_ENTRIES[0].version);
+  assert.ok(CHANGELOG_ENTRIES.length >= 6);
+
+  const seen = new Set<string>();
+  for (const entry of CHANGELOG_ENTRIES) {
+    assert.ok(isValidVersionFormat(entry.version), `Invalid version string: ${entry.version}`);
+    assert.equal(seen.has(entry.version), false, `Duplicate version: ${entry.version}`);
+    seen.add(entry.version);
+    assert.ok(entry.changes.length >= 2, `Expected detailed changes in ${entry.version}`);
+    if (entry.kind === 'fix') {
+      assert.equal(isPatchVersion(entry.version), true, `Fix release ${entry.version} must use V1.X.Y format`);
+    } else {
+      assert.equal(isPatchVersion(entry.version), false, `Feature/major release ${entry.version} must use V1.X format`);
+    }
+  }
+
+  const fixes = filterChangelogEntries(CHANGELOG_ENTRIES, 'fixes');
+  const features = filterChangelogEntries(CHANGELOG_ENTRIES, 'features');
+  assert.ok(fixes.length >= 2);
+  assert.ok(features.length >= 4);
+  assert.equal(fixes.length + features.length, CHANGELOG_ENTRIES.length);
+});
+

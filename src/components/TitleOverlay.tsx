@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
-import { Gamepad2, Smartphone, Play, Wind } from 'lucide-react';
+import { Gamepad2, Smartphone, Play, Sparkles, Wind } from 'lucide-react';
 import { MISSIONS } from '../sim/missions';
+import { GAME_VERSION } from '../sim/changelog';
 import type { FlightMode, MissionId } from '../sim/types';
 
 interface TitleOverlayProps {
@@ -10,11 +11,13 @@ interface TitleOverlayProps {
   controllerConnected: boolean;
   gamepadConnected: boolean;
   gamepadLabel?: string;
+  modalOpen?: boolean;
   onSelectMission: (id: MissionId) => void;
   onSelectFlightMode: (mode: FlightMode) => void;
   onToggleWind: () => void;
   onStartFlight: () => void;
   onOpenPairing: () => void;
+  onOpenChangelog: () => void;
 }
 
 const MODE_OPTIONS: Array<{ id: FlightMode; label: string; desc: string }> = [
@@ -30,14 +33,17 @@ export function TitleOverlay({
   controllerConnected,
   gamepadConnected,
   gamepadLabel,
+  modalOpen = false,
   onSelectMission,
   onSelectFlightMode,
   onToggleWind,
   onStartFlight,
   onOpenPairing,
+  onOpenChangelog,
 }: TitleOverlayProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (modalOpen) return;
       if (e.code === 'Enter' || e.code === 'Space') {
         if (document.activeElement?.tagName === 'BUTTON') return;
         e.preventDefault();
@@ -46,7 +52,7 @@ export function TitleOverlay({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onStartFlight]);
+  }, [modalOpen, onStartFlight]);
 
   return (
     <div className="fixed inset-0 z-20 flex flex-col justify-between p-6 md:p-10 pointer-events-none">
@@ -78,9 +84,17 @@ export function TitleOverlay({
             <circle cx="24" cy="20" r="1.8" fill="#38bdf8" />
           </svg>
           <div>
-            <h1 className="font-display text-3xl md:text-4xl font-bold tracking-tight text-white leading-none">
-              AeroTrainer 3D
-            </h1>
+            <div className="flex items-baseline gap-2">
+              <h1 className="font-display text-3xl md:text-4xl font-bold tracking-tight text-white leading-none">
+                AeroTrainer 3D
+              </h1>
+              <span
+                data-testid="game-version-label"
+                className="text-xs font-mono font-medium text-slate-400 tracking-wide"
+              >
+                {GAME_VERSION}
+              </span>
+            </div>
             <p className="text-sm text-slate-300 mt-1">
               Simulador de Voo & Treinamento de Drone
             </p>
@@ -216,22 +230,37 @@ export function TitleOverlay({
         </div>
       </div>
 
-      {/* Flat borderless bottom control hint line */}
-      <div
-        className="relative z-10 text-xs text-slate-200 flex flex-wrap items-center gap-x-2.5 gap-y-1"
-        style={{ textShadow: '0 1px 3px rgba(0, 0, 0, 0.9)' }}
-      >
-        <span>Espaço / Shift Subir e Descer</span>
-        <span aria-hidden="true">·</span>
-        <span>Q / E Girar</span>
-        <span aria-hidden="true">·</span>
-        <span>W A S D / Setas Mover</span>
-        <span aria-hidden="true">·</span>
-        <span>Sticks Xbox/DS4</span>
-        <span aria-hidden="true">·</span>
-        <span>C Câmera</span>
-        <span aria-hidden="true">·</span>
-        <span>P Pausar</span>
+      {/* Bottom Bar: Flat control hints on left + "Novidades!" changelog button on bottom-right */}
+      <div className="relative z-10 flex flex-wrap items-end justify-between gap-3">
+        <div
+          className="text-xs text-slate-200 flex flex-wrap items-center gap-x-2.5 gap-y-1"
+          style={{ textShadow: '0 1px 3px rgba(0, 0, 0, 0.9)' }}
+        >
+          <span>Espaço / Shift Subir e Descer</span>
+          <span aria-hidden="true">·</span>
+          <span>Q / E Girar</span>
+          <span aria-hidden="true">·</span>
+          <span>W A S D / Setas Mover</span>
+          <span aria-hidden="true">·</span>
+          <span>Sticks Xbox/DS4</span>
+          <span aria-hidden="true">·</span>
+          <span>C Câmera</span>
+          <span aria-hidden="true">·</span>
+          <span>P Pausar</span>
+        </div>
+
+        <button
+          type="button"
+          data-testid="changelog-open-btn"
+          onClick={(e) => {
+            e.currentTarget.blur();
+            onOpenChangelog();
+          }}
+          className="pointer-events-auto ml-auto shrink-0 px-3.5 py-2 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-600 hover:border-amber-400 text-slate-100 text-xs font-semibold flex items-center gap-2 transition-colors shadow-lg cursor-pointer whitespace-nowrap"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+          <span>Novidades!</span>
+        </button>
       </div>
     </div>
   );

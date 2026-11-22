@@ -12,11 +12,13 @@ Simulador 3D de voo e treinamento para drones quadricópteros construído com Re
 - `src/sim/gamepad.ts`: Leitura pura da Gamepad API para controles Xbox / XInput / PS4 via DS4Windows (USB ou Bluetooth), utilizando exclusivamente os dois sticks analógicos em configuração RC Modo 2 com zona morta (`STICK_DEADZONE = 0.08`) e reescala suave.
 - `src/sim/crashAnimation.ts`: Física pura da animação pós-colisão (rebote, queda com giro descontrolado/tumble, quique no solo e temporização antes da tela de resultado).
 - `src/sim/crashEffects.ts`: Pool pré-alocado de partículas 3D de colisão (onda de choque, faíscas, fragmentos, hélices soltas e fumaça).
+- `src/sim/changelog.ts`: Histórico oficial de versões (`V1.X` para recursos, `V1.X.Y` para correções) e filtragem das alterações desde a V1.0.
 - `src/sim/worldBuilder.ts`: Construção da cena Three.js (terreno, lago, pistas, estruturas, vegetação, iluminação e visuais de missão).
 - `src/sim/droneMesh.ts`: Rig 3D do drone quadricóptero, hélices, gimbal estabilizado e sombra de contato.
 - `src/sim/audio.ts`: Síntese procedural de motores, portões e colisões via Web Audio API.
 - `src/components/DroneCanvas.tsx`: Loop WebGL/Three.js (`requestAnimationFrame` / `afterDraw` em software GL), amostragem unificada de teclado + celular + gamepad físico e câmeras (`chase`, `fpv`, `los`).
-- `src/components/TitleOverlay.tsx`: Tela inicial com seleção de missões, modo de voo, vento, pareamento celular e indicador de controle Xbox/DS4.
+- `src/components/TitleOverlay.tsx`: Tela inicial com seleção de missões, modo de voo, vento, pareamento celular, indicador discreto de versão ao lado do título e botão "Novidades!" no canto inferior direito.
+- `src/components/ChangelogModal.tsx`: Modal acessível exibindo a linha do tempo detalhada de versões com filtros.
 - `src/components/FlightHUD.tsx`: HUD de voo com objetivo da missão, troca rápida de modo, câmera/som/pausa, status de controle Xbox/DS4, visualizador ao vivo dos sticks Modo 2 e barra de telemetria.
 - `src/components/Modals.tsx`: Modais de pausa (`PauseModal`) e resultado de missão (`OutcomeModal`).
 - `src/components/PairingModal.tsx` & `src/components/MobileController.tsx`: Controle remoto virtual por celular via WebSocket (`/ws`).
