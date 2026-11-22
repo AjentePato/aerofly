@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Smartphone, Play, Wind } from 'lucide-react';
+import { Gamepad2, Smartphone, Play, Wind } from 'lucide-react';
 import { MISSIONS } from '../sim/missions';
 import type { FlightMode, MissionId } from '../sim/types';
 
@@ -8,6 +8,8 @@ interface TitleOverlayProps {
   flightMode: FlightMode;
   windEnabled: boolean;
   controllerConnected: boolean;
+  gamepadConnected: boolean;
+  gamepadLabel?: string;
   onSelectMission: (id: MissionId) => void;
   onSelectFlightMode: (mode: FlightMode) => void;
   onToggleWind: () => void;
@@ -26,6 +28,8 @@ export function TitleOverlay({
   flightMode,
   windEnabled,
   controllerConnected,
+  gamepadConnected,
+  gamepadLabel,
   onSelectMission,
   onSelectFlightMode,
   onToggleWind,
@@ -84,7 +88,7 @@ export function TitleOverlay({
         </div>
 
         <p className="text-sm leading-relaxed text-slate-200 max-w-md">
-          Pratique decolagem, orientação espacial e curvas coordenadas antes de pilotar um drone real. Use o teclado no PC ou pareie seu celular como rádio controle.
+          Pratique decolagem, orientação espacial e curvas coordenadas antes de pilotar um drone real. Use o teclado, controle Xbox / PS4 (DS4) ou pareie seu celular como rádio controle.
         </p>
 
         {/* Mission Selector */}
@@ -190,15 +194,40 @@ export function TitleOverlay({
             {controllerConnected ? 'Celular Conectado' : 'Conectar Celular'}
           </button>
         </div>
+
+        {/* Physical Xbox / DS4 Gamepad status indicator (sticks only, cable or Bluetooth) */}
+        <div
+          data-testid="title-gamepad-status"
+          className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg border ${
+            gamepadConnected
+              ? 'bg-emerald-950/85 border-emerald-500/50 text-emerald-100'
+              : 'bg-slate-950/80 border-slate-800 text-slate-300'
+          }`}
+        >
+          <Gamepad2
+            className={`w-4 h-4 shrink-0 ${gamepadConnected ? 'text-emerald-400' : 'text-slate-400'}`}
+            aria-hidden="true"
+          />
+          <span className="truncate">
+            {gamepadConnected
+              ? `Controle Conectado (${gamepadLabel || 'Xbox / DS4'}) · Apenas Sticks`
+              : 'Controle Xbox / PS4 (DS4) USB ou Bluetooth: mova um stick para ativar'}
+          </span>
+        </div>
       </div>
 
       {/* Flat borderless bottom control hint line */}
-      <div className="relative z-10 text-xs text-slate-300/90 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div
+        className="relative z-10 text-xs text-slate-200 flex flex-wrap items-center gap-x-2.5 gap-y-1"
+        style={{ textShadow: '0 1px 3px rgba(0, 0, 0, 0.9)' }}
+      >
         <span>Espaço / Shift Subir e Descer</span>
         <span aria-hidden="true">·</span>
-        <span>Q / E Girar (Yaw)</span>
+        <span>Q / E Girar</span>
         <span aria-hidden="true">·</span>
-        <span>W A S D ou Setas Mover</span>
+        <span>W A S D / Setas Mover</span>
+        <span aria-hidden="true">·</span>
+        <span>Sticks Xbox/DS4</span>
         <span aria-hidden="true">·</span>
         <span>C Câmera</span>
         <span aria-hidden="true">·</span>

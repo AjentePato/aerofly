@@ -1,4 +1,4 @@
-import { Camera, Pause, RotateCcw, Smartphone, Volume2, VolumeX } from 'lucide-react';
+import { AlertTriangle, Camera, Gamepad2, Pause, RotateCcw, Smartphone, Volume2, VolumeX } from 'lucide-react';
 import { getMissionById } from '../sim/missions';
 import type {
   CameraMode,
@@ -14,6 +14,8 @@ interface FlightHUDProps {
   sticks: StickInput;
   muted: boolean;
   controllerConnected: boolean;
+  gamepadConnected: boolean;
+  gamepadLabel?: string;
   onCycleCamera: () => void;
   onToggleMute: () => void;
   onTogglePause: () => void;
@@ -56,6 +58,8 @@ export function FlightHUD({
   sticks,
   muted,
   controllerConnected,
+  gamepadConnected,
+  gamepadLabel,
   onCycleCamera,
   onToggleMute,
   onTogglePause,
@@ -73,6 +77,26 @@ export function FlightHUD({
 
   return (
     <div className="fixed inset-0 z-10 pointer-events-none select-none flex flex-col justify-between p-4 md:p-6">
+      {/* Brief peripheral crash impact flash & status during tumble sequence */}
+      {telemetry.crashed && (
+        <>
+          <div
+            className="fixed inset-0 pointer-events-none animate-pulse"
+            style={{
+              background:
+                'radial-gradient(circle at center, rgba(239, 68, 68, 0) 42%, rgba(220, 38, 38, 0.42) 100%)',
+            }}
+          />
+          <div
+            data-testid="crash-impact-banner"
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-lg border border-rose-500/70 bg-rose-950/90 text-rose-100 text-xs font-display font-bold tracking-wider uppercase flex items-center gap-2 shadow-lg"
+          >
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" aria-hidden="true" />
+            <span>Impacto Detectado</span>
+          </div>
+        </>
+      )}
+
       {/* Top Perimeter Row */}
       <div className="flex items-start justify-between gap-4">
         {/* Top-Left: Mission Objective & Flight Mode Switch */}
@@ -132,6 +156,19 @@ export function FlightHUD({
 
         {/* Top-Right: Compact Utility Controls */}
         <div className="pointer-events-auto flex items-center gap-2">
+          {gamepadConnected && (
+            <div
+              data-testid="hud-gamepad-status"
+              title={`${gamepadLabel || 'Controle Xbox / DS4'} — Sticks Modo 2 ativos`}
+              aria-label="Controle Xbox ou DS4 conectado"
+              className="h-10 px-3 rounded-lg border border-emerald-500/45 text-xs font-medium text-emerald-200 flex items-center gap-2 whitespace-nowrap"
+              style={{ backgroundColor: 'rgba(8, 13, 24, 0.85)' }}
+            >
+              <Gamepad2 className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
+              <span className="hidden sm:inline">Xbox / DS4</span>
+            </div>
+          )}
+
           <button
             type="button"
             tabIndex={-1}

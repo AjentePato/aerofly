@@ -1,4 +1,4 @@
-import { Play, RotateCcw, Smartphone, Wind, Award, AlertTriangle, Home } from 'lucide-react';
+import { Play, RotateCcw, Smartphone, Wind, Award, AlertTriangle, Home, Gamepad2 } from 'lucide-react';
 import { MISSIONS, getMissionById } from '../sim/missions';
 import type { CameraMode, DronePhysicsState, FlightMode, MissionId, MissionProgress } from '../sim/types';
 
@@ -8,6 +8,8 @@ interface PauseModalProps {
   cameraMode: CameraMode;
   windEnabled: boolean;
   controllerConnected: boolean;
+  gamepadConnected?: boolean;
+  gamepadLabel?: string;
   onResume: () => void;
   onRestart: () => void;
   onReturnTitle: () => void;
@@ -24,6 +26,8 @@ export function PauseModal({
   cameraMode,
   windEnabled,
   controllerConnected,
+  gamepadConnected = false,
+  gamepadLabel,
   onResume,
   onRestart,
   onReturnTitle,
@@ -45,7 +49,7 @@ export function PauseModal({
         className="w-full max-w-lg rounded-xl border border-slate-700 p-6 text-slate-100 flex flex-col gap-5"
         style={{ backgroundColor: 'rgba(12, 18, 32, 0.96)' }}
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <h2 id="pause-title" className="font-display text-2xl font-bold text-white">
               Simulação Pausada
@@ -63,6 +67,15 @@ export function PauseModal({
             {controllerConnected ? 'Celular Ativo' : 'Parear Celular'}
           </button>
         </div>
+
+        {gamepadConnected && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-xs text-emerald-200">
+            <Gamepad2 className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
+            <span>
+              Controle conectado ({gamepadLabel || 'Xbox / DS4'}) · Stick Esq: Acel/Yaw · Stick Dir: Pitch/Roll
+            </span>
+          </div>
+        )}
 
         {/* Mission Switch */}
         <div>

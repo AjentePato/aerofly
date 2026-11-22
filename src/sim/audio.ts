@@ -131,7 +131,34 @@ export class DroneAudioEngine {
   }
 
   public playCrashThud(): void {
-    this.playTone(130, 42, 0.28, 'sawtooth', 0.25);
+    this.playTone(145, 36, 0.34, 'sawtooth', 0.28);
+    if (!this.initialized || !this.ctx || !this.masterGain || this.muted) return;
+    // Short filtered metallic/carbon crunch burst
+    const now = this.ctx.currentTime;
+    const len = Math.floor(this.ctx.sampleRate * 0.22);
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const ch = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.055));
+    }
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const bp = this.ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 950;
+    bp.Q.value = 0.7;
+    const gain = this.ctx.createGain();
+    gain.gain.setValueAtTime(0.32, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.21);
+    src.connect(bp);
+    bp.connect(gain);
+    gain.connect(this.masterGain);
+    src.start(now);
+  }
+
+  public playSecondaryBounce(intensity = 0.5): void {
+    const vol = Math.max(0.05, Math.min(0.22, intensity * 0.18));
+    this.playTone(95, 38, 0.14, 'triangle', vol);
   }
 
   public playClick(): void {

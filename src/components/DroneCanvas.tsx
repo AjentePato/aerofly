@@ -11,6 +11,14 @@ import {
 } from '../sim/physics';
 import { createInitialMissionProgress, evaluateMissionStep, getMissionById } from '../sim/missions';
 import { DroneAudioEngine } from '../sim/audio';
+import { readBrowserGamepad, type GamepadStatus } from '../sim/gamepad';
+import {
+  createIdleCrashTumble,
+  initCrashTumble,
+  stepCrashTumble,
+  type CrashTumbleState,
+} from '../sim/crashAnimation';
+import { createCrashEffects } from '../sim/crashEffects';
 import type {
   CameraMode,
   DronePhysicsState,
@@ -40,6 +48,7 @@ export interface SimBridgeProps {
   onSelectFlightMode: (mode: FlightMode) => void;
   onToggleMute: () => void;
   onTriggerReset: () => void;
+  onGamepadStatusChange?: (status: GamepadStatus) => void;
 }
 
 // Pre-allocated math helpers outside the 60Hz loop (zero GC)
@@ -102,6 +111,7 @@ export function DroneCanvas(props: SimBridgeProps) {
     scene.add(droneRig.root);
     scene.add(droneRig.contactShadow);
 
+    const crashEffects = createCrashEffects(scene);
     const audio = new DroneAudioEngine();
 
     if (!isSoftwareGl) {
@@ -111,6 +121,10 @@ export function DroneCanvas(props: SimBridgeProps) {
     // Simulation state held inside effect (never triggers React re-renders per frame)
     let droneState = createInitialDroneState();
     let missionProgress = createInitialMissionProgress(propsRef.current.missionId);
+    let crashTumble: CrashTumbleState = createIdleCrashTumble();
+    let crashMissionSnapshot: MissionProgress | null = null;
+    let crashVisualYawAnchor = 0;
+    let crashStartWallMs = 0;
     let lastMissionId = propsRef.current.missionId;
     let lastResetNonce = propsRef.current.resetNonce;
     let lastPhase = propsRef.current.phase;
@@ -179,10 +193,26 @@ export function DroneCanvas(props: SimBridgeProps) {
       audio.init();
     };
 
+    let lastGpConnected = false;
+    let lastGpLabel = '';
+    const emitGamepadIfChanged = (status: GamepadStatus) => {
+      if (status.connected !== lastGpConnected || status.label !== lastGpLabel) {
+        lastGpConnected = status.connected;
+        lastGpLabel = status.label;
+        propsRef.current.onGamepadStatusChange?.(status);
+      }
+    };
+    const onGamepadChange = () => {
+      emitGamepadIfChanged(readBrowserGamepad().status);
+    };
+
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', clearKeys);
     window.addEventListener('pointerdown', onPointerDown, { passive: true });
+    window.addEventListener('gamepadconnected', onGamepadChange);
+    window.addEventListener('gamepaddisconnected', onGamepadChange);
+    onGamepadChange();
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) clearKeys();
     });
@@ -196,18 +226,16 @@ export function DroneCanvas(props: SimBridgeProps) {
     };
     window.addEventListener('resize', onResize);
 
-    function sampleCombinedSticks(): StickInput {
+    function sampleCombinedSticks(gpSticks?: StickInput): StickInput {
       let throttle = 0;
       let yaw = 0;
       let pitch = 0;
       let roll = 0;
 
       // Mode 2 Keyboard Mapping:
-      // Left Stick: Space/E (Climb), Shift/F (Descend), Q/A (Yaw Left), D? Wait:
-      // Let's support intuitive PC layout:
-      // WASD = Pitch/Roll (Right stick: W forward, S backward, A roll left, D roll right) OR Arrow keys!
-      // AND Space/Shift = Throttle Up/Down, Q/E = Yaw Left/Right!
-      // Also support I/K/J/L for pure Mode-2 Left/Right stick users if desired.
+      // WASD = Pitch/Roll (Right stick) OR Arrow keys
+      // Space/Shift = Throttle Up/Down, Q/E = Yaw Left/Right
+      // Also support I/K/J/L for pure Mode-2 Left/Right stick users
       if (keys.has('Space') || keys.has('KeyI')) throttle += 1;
       if (keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('KeyK')) throttle -= 1;
       if (keys.has('KeyQ') || keys.has('KeyJ')) yaw -= 1;
@@ -225,6 +253,14 @@ export function DroneCanvas(props: SimBridgeProps) {
         if (Math.abs(r.yaw) > 0.02) yaw = r.yaw;
         if (Math.abs(r.pitch) > 0.02) pitch = r.pitch;
         if (Math.abs(r.roll) > 0.02) roll = r.roll;
+      }
+
+      // Merge physical Xbox / DS4 gamepad sticks strictly (Mode 2 analog sticks only)
+      if (gpSticks) {
+        throttle += gpSticks.throttle;
+        yaw += gpSticks.yaw;
+        pitch += gpSticks.pitch;
+        roll += gpSticks.roll;
       }
 
       return {
@@ -258,6 +294,18 @@ export function DroneCanvas(props: SimBridgeProps) {
     function resetSimulation(missionId: MissionId) {
       droneState = createInitialDroneState();
       missionProgress = createInitialMissionProgress(missionId);
+      crashTumble = createIdleCrashTumble();
+      crashMissionSnapshot = null;
+      crashVisualYawAnchor = 0;
+      crashStartWallMs = 0;
+      crashEffects.reset();
+      droneRig.propellers.forEach((p) => {
+        p.visible = true;
+      });
+      droneRig.frontLedMat.emissive.setHex(0x38bdf8);
+      droneRig.frontLedMat.emissiveIntensity = 2.2;
+      droneRig.rearLedMat.emissive.setHex(0xef4444);
+      droneRig.rearLedMat.emissiveIntensity = 2.2;
       camShakeTrauma = 0;
       visualChaseYaw = droneState.yaw;
       visualYawBank = 0;
@@ -298,6 +346,8 @@ export function DroneCanvas(props: SimBridgeProps) {
       world.towerBeaconMat.emissiveIntensity = 1.5 + Math.max(0, Math.sin(elapsed * 3.2)) * 2.5;
 
       const missionDef = getMissionById(cur.missionId);
+      const gpSample = readBrowserGamepad();
+      emitGamepadIfChanged(gpSample.status);
       let activeSticks: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
 
       if (cur.phase === 'title') {
@@ -322,56 +372,100 @@ export function DroneCanvas(props: SimBridgeProps) {
         camera.updateProjectionMatrix();
         audio.updateMotors(0, false, 0);
       } else if (cur.phase === 'playing') {
-        activeSticks = sampleCombinedSticks();
-        droneState = stepDronePhysics(
-          droneState,
-          activeSticks,
-          { flightMode: cur.flightMode, windEnabled: cur.windEnabled, windTimeSec: elapsed, turbineAngle },
-          dt
-        );
+        if (!crashTumble.active) {
+          activeSticks = sampleCombinedSticks(gpSample.sticks);
+          droneState = stepDronePhysics(
+            droneState,
+            activeSticks,
+            { flightMode: cur.flightMode, windEnabled: cur.windEnabled, windTimeSec: elapsed, turbineAngle },
+            dt
+          );
 
-        const stepRes = evaluateMissionStep(missionProgress, droneState, dt);
-        missionProgress = stepRes.progress;
+          const stepRes = evaluateMissionStep(missionProgress, droneState, dt);
+          missionProgress = stepRes.progress;
 
-        if (stepRes.event === 'gate_passed') {
-          audio.playGateChime();
-          camShakeTrauma = Math.min(1, camShakeTrauma + 0.18);
-        } else if (stepRes.event === 'completed') {
-          audio.playSuccessFanfare();
-          cur.onMissionComplete(missionProgress, droneState);
-        } else if (stepRes.event === 'crashed') {
-          audio.playCrashThud();
-          camShakeTrauma = 0.75;
-          cur.onCrash(missionProgress, droneState);
+          if (stepRes.event === 'gate_passed') {
+            audio.playGateChime();
+            camShakeTrauma = Math.min(1, camShakeTrauma + 0.18);
+          } else if (stepRes.event === 'completed') {
+            audio.playSuccessFanfare();
+            cur.onMissionComplete(missionProgress, droneState);
+          } else if (stepRes.event === 'crashed') {
+            const started = initCrashTumble(droneState);
+            droneState = started.drone;
+            crashTumble = started.tumble;
+            crashMissionSnapshot = missionProgress;
+            crashVisualYawAnchor = visualChaseYaw;
+            crashStartWallMs = now;
+            crashEffects.trigger(crashTumble.impactPos, droneState.velocity, crashTumble.brokenProps);
+            audio.updateMotors(0, false, 0);
+            audio.playCrashThud();
+            camShakeTrauma = 1.0;
+
+            droneRig.propellers.forEach((p, idx) => {
+              p.visible = !crashTumble.brokenProps[idx];
+            });
+            droneRig.propBlurDiscs.forEach((d) => {
+              d.visible = false;
+            });
+            droneRig.frontLedMat.emissive.setHex(0xef4444);
+            droneRig.rearLedMat.emissive.setHex(0xef4444);
+          }
+        } else {
+          const tumbleStep = stepCrashTumble(droneState, crashTumble, dt);
+          droneState = tumbleStep.drone;
+          crashTumble = tumbleStep.tumble;
+          if (tumbleStep.groundImpactSpeed > 1.2) {
+            audio.playSecondaryBounce(Math.min(1, tumbleStep.groundImpactSpeed / 6));
+            camShakeTrauma = Math.min(1, camShakeTrauma + 0.35);
+          }
+
+          const blinkOn = Math.floor(crashTumble.elapsedSec * 14) % 2 === 0;
+          droneRig.frontLedMat.emissiveIntensity = blinkOn ? 3.5 : 0.12;
+          droneRig.rearLedMat.emissiveIntensity = blinkOn ? 3.5 : 0.12;
+
+          if ((tumbleStep.finished || now - crashStartWallMs >= 1500) && crashMissionSnapshot) {
+            crashTumble.modalTriggered = true;
+            crashTumble.active = false;
+            cur.onCrash(crashMissionSnapshot, droneState);
+          }
         }
+
+        crashEffects.update(dt);
 
         // Smooth coordinated yaw-bank visual lean + gimbal pan lead when turning (Q/E)
         const targetYawBank =
-          cur.flightMode === 'acro' || droneState.onGround
+          crashTumble.active || cur.flightMode === 'acro' || droneState.onGround
             ? 0
             : Math.max(-0.22, Math.min(0.22, droneState.angVel.y * 0.085));
         visualYawBank += (targetYawBank - visualYawBank) * (1 - Math.exp(-10 * dt));
-        visualChaseYaw += (droneState.yaw - visualChaseYaw) * (1 - Math.exp(-7.5 * dt));
+        if (!crashTumble.active) {
+          visualChaseYaw += (droneState.yaw - visualChaseYaw) * (1 - Math.exp(-7.5 * dt));
+        }
 
         // Apply drone transform (coordinated visual bank makes turns visibly fluid)
         droneRig.root.position.set(droneState.position.x, droneState.position.y, droneState.position.z);
         _euler.set(droneState.pitch, droneState.yaw, droneState.roll + visualYawBank, 'YXZ');
         droneRig.root.quaternion.setFromEuler(_euler);
 
-        // Gimbal stabilization counter-tilt + subtle look-into-turn yaw lead
-        const yawLead = droneState.onGround ? 0 : Math.max(-0.16, Math.min(0.16, droneState.angVel.y * 0.06));
-        droneRig.gimbalHead.rotation.x = cur.cameraMode === 'fpv' ? 0.12 : -droneState.pitch * 0.75;
-        droneRig.gimbalHead.rotation.y = cur.cameraMode === 'fpv' ? yawLead * 0.5 : yawLead;
-        droneRig.gimbalHead.rotation.z = cur.cameraMode === 'fpv' ? 0 : -(droneState.roll + visualYawBank * 0.45) * 0.75;
+        // Gimbal stabilization counter-tilt (or crooked/hanging after crash impact)
+        const yawLead = droneState.onGround || crashTumble.active ? 0 : Math.max(-0.16, Math.min(0.16, droneState.angVel.y * 0.06));
+        if (crashTumble.active) {
+          droneRig.gimbalHead.rotation.set(-0.26, 0.18, 0.24);
+        } else {
+          droneRig.gimbalHead.rotation.x = cur.cameraMode === 'fpv' ? 0.12 : -droneState.pitch * 0.75;
+          droneRig.gimbalHead.rotation.y = cur.cameraMode === 'fpv' ? yawLead * 0.5 : yawLead;
+          droneRig.gimbalHead.rotation.z = cur.cameraMode === 'fpv' ? 0 : -(droneState.roll + visualYawBank * 0.45) * 0.75;
+        }
 
-        // Spin propellers proportional to motorPower
-        const rpmScale = droneState.armed ? 14 + droneState.motorPower * 65 : 0;
+        // Spin propellers proportional to motorPower (disarmed/stopped during crash)
+        const rpmScale = droneState.armed && !crashTumble.active ? 14 + droneState.motorPower * 65 : 0;
         propAngle += dt * rpmScale;
-        const showBlur = droneState.armed && droneState.motorPower > 0.1;
+        const showBlur = droneState.armed && !crashTumble.active && droneState.motorPower > 0.1;
         droneRig.propellers.forEach((p, idx) => {
           const dir = (p.userData.spinDir as number) || 1;
           p.rotation.y = propAngle * dir;
-          droneRig.propBlurDiscs[idx].visible = showBlur;
+          droneRig.propBlurDiscs[idx].visible = showBlur && p.visible;
         });
 
         // Contact shadow tracking ground below drone
@@ -423,13 +517,14 @@ export function DroneCanvas(props: SimBridgeProps) {
             camera.updateProjectionMatrix();
           }
         } else {
-          // Chase Cam: smooth yaw lag lets you watch the drone bank & pivot cleanly during Q/E turns
+          // Chase Cam: anchors heading and pulls back slightly during crash tumble so impact is clearly visible
           droneRig.root.visible = true;
-          _forwardDir.set(-Math.sin(visualChaseYaw), 0, -Math.cos(visualChaseYaw));
+          const chaseHeading = crashTumble.active ? crashVisualYawAnchor : visualChaseYaw;
+          _forwardDir.set(-Math.sin(chaseHeading), 0, -Math.cos(chaseHeading));
           _camDesiredPos
             .set(droneState.position.x, droneState.position.y, droneState.position.z)
-            .addScaledVector(_forwardDir, -4.4);
-          _camDesiredPos.y += 1.65;
+            .addScaledVector(_forwardDir, crashTumble.active ? -5.4 : -4.4);
+          _camDesiredPos.y += crashTumble.active ? 2.05 : 1.65;
 
           // Prevent camera from clipping below terrain
           const camGround = groundHeightAt(_camDesiredPos.x, _camDesiredPos.z);
@@ -453,9 +548,13 @@ export function DroneCanvas(props: SimBridgeProps) {
           }
 
           camera.position.lerp(_camDesiredPos, 1 - Math.exp(-8.5 * dt));
-          _camTargetPos
-            .set(droneState.position.x, droneState.position.y + 0.45, droneState.position.z)
-            .addScaledVector(_forwardDir, 4.2);
+          if (crashTumble.active) {
+            _camTargetPos.set(droneState.position.x, droneState.position.y + 0.25, droneState.position.z);
+          } else {
+            _camTargetPos
+              .set(droneState.position.x, droneState.position.y + 0.45, droneState.position.z)
+              .addScaledVector(_forwardDir, 4.2);
+          }
           camera.lookAt(_camTargetPos);
 
           const targetFov = 62 + Math.min(10, speed * 0.4);
@@ -481,8 +580,11 @@ export function DroneCanvas(props: SimBridgeProps) {
           camShakeTrauma = Math.max(0, camShakeTrauma - dt * 2.2);
         }
       } else {
-        // Paused or GameOver: silence motors smoothly
+        // Paused or GameOver: silence motors smoothly and keep particles settling
         audio.updateMotors(0, false, 0);
+        if (cur.phase === 'gameover') {
+          crashEffects.update(dt);
+        }
       }
 
       world.updateMissionVisuals(missionDef, missionProgress, elapsed);
@@ -517,8 +619,11 @@ export function DroneCanvas(props: SimBridgeProps) {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', clearKeys);
       window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('gamepadconnected', onGamepadChange);
+      window.removeEventListener('gamepaddisconnected', onGamepadChange);
       window.removeEventListener('resize', onResize);
       audio.dispose();
+      crashEffects.dispose();
       world.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === container) {

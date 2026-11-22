@@ -6,6 +6,7 @@ import { OutcomeModal, PauseModal } from './components/Modals';
 import { PairingModal } from './components/PairingModal';
 import { MobileController } from './components/MobileController';
 import { MISSIONS, createInitialMissionProgress, getMissionById } from './sim/missions';
+import { readBrowserGamepad, type GamepadStatus } from './sim/gamepad';
 import type {
   CameraMode,
   DronePhysicsState,
@@ -72,6 +73,7 @@ export default function App() {
   const [showPairing, setShowPairing] = useState(false);
 
   const [controllerCount, setControllerCount] = useState(0);
+  const [gamepadStatus, setGamepadStatus] = useState<GamepadStatus>(() => readBrowserGamepad().status);
   const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
   const [remotePreview, setRemotePreview] = useState<StickInput>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
   const remoteStickRef = useRef<StickInput>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
@@ -304,6 +306,7 @@ export default function App() {
         onSelectFlightMode={setFlightMode}
         onToggleMute={() => setMuted((m) => !m)}
         onTriggerReset={handleReset}
+        onGamepadStatusChange={setGamepadStatus}
       />
 
       {phase === 'title' && (
@@ -312,6 +315,8 @@ export default function App() {
           flightMode={flightMode}
           windEnabled={windEnabled}
           controllerConnected={controllerCount > 0}
+          gamepadConnected={gamepadStatus.connected}
+          gamepadLabel={gamepadStatus.label}
           onSelectMission={handleSelectMission}
           onSelectFlightMode={setFlightMode}
           onToggleWind={() => setWindEnabled((w) => !w)}
@@ -327,6 +332,8 @@ export default function App() {
           sticks={activeSticks}
           muted={muted}
           controllerConnected={controllerCount > 0}
+          gamepadConnected={gamepadStatus.connected}
+          gamepadLabel={gamepadStatus.label}
           onCycleCamera={cycleCamera}
           onToggleMute={() => setMuted((m) => !m)}
           onTogglePause={handleTogglePause}
@@ -343,6 +350,8 @@ export default function App() {
           cameraMode={cameraMode}
           windEnabled={windEnabled}
           controllerConnected={controllerCount > 0}
+          gamepadConnected={gamepadStatus.connected}
+          gamepadLabel={gamepadStatus.label}
           onResume={() => setPhase('playing')}
           onRestart={handleReset}
           onReturnTitle={() => {

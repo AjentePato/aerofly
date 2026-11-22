@@ -13,6 +13,14 @@ import {
 import { STRUCTURE_SLAB_ELEVATION, buildWorldStructures } from './structures';
 import { MISSIONS, getMissionById, createInitialMissionProgress, evaluateMissionStep } from './missions';
 import { computeFloatingStickOrigin, computeFloatingStickValue } from './floatingStick';
+import {
+  STICK_DEADZONE,
+  formatGamepadLabel,
+  mapStandardGamepadToSticks,
+  pickPrimaryGamepad,
+  rescaleStickAxis,
+} from './gamepad';
+import { CRASH_ANIMATION_DURATION_SEC, initCrashTumble, stepCrashTumble } from './crashAnimation';
 import type { PhysicsConfig, StickInput } from './types';
 
 const neutralInput: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
@@ -386,4 +394,91 @@ test('all pine trees have real trunk and foliage cone collisions and keep gates 
       }
     }
   }
+});
+
+test('Xbox/DS4 gamepad stick deadzone and smooth Mode-2 axis mapping', () => {
+  assert.equal(rescaleStickAxis(0.05), 0);
+  assert.equal(rescaleStickAxis(-0.07), 0);
+  assert.equal(rescaleStickAxis(Number.NaN), 0);
+  assert.equal(rescaleStickAxis(1), 1);
+  assert.equal(rescaleStickAxis(-1), -1);
+
+  // Value slightly past deadzone rescales smoothly starting near 0 without jump
+  const justPast = rescaleStickAxis(STICK_DEADZONE + 0.02);
+  assert.ok(justPast > 0 && justPast < 0.05, `Expected smooth start after deadzone, got ${justPast}`);
+
+  // Neutral sticks with minor DS4/Xbox center drift map to exact 0
+  const drifted = mapStandardGamepadToSticks([0.04, -0.05, -0.03, 0.06]);
+  assert.deepEqual(drifted, { throttle: 0, yaw: 0, pitch: 0, roll: 0 });
+
+  // Mode 2 sticks: Left Up (-Y) -> +throttle, Left Right (+X) -> +yaw,
+  // Right Up (-Y) -> +pitch forward, Right Left (-X) -> -roll left
+  const active = mapStandardGamepadToSticks([1, -1, -1, -1]);
+  assert.deepEqual(active, { throttle: 1, yaw: 1, pitch: 1, roll: -1 });
+
+  // Drives drone physics cleanly (climb + pitch forward) using only sticks
+  let drone = createInitialDroneState();
+  const stickCmd = mapStandardGamepadToSticks([0, -0.85, 0, -0.6]);
+  for (let i = 0; i < 60; i++) {
+    drone = stepDronePhysics(drone, stickCmd, normalConfig, 1 / 60);
+  }
+  assert.ok(drone.position.y > 1.5, `Expected drone to climb with left stick up, got y=${drone.position.y}`);
+  assert.ok(drone.position.z < -0.5, `Expected drone to pitch/fly north with right stick up, got z=${drone.position.z}`);
+});
+
+test('pickPrimaryGamepad prioritizes connected standard controllers and supports Bluetooth fallback', () => {
+  const disconnected = { id: 'Xbox 360 Controller', connected: false, mapping: 'standard', axes: [0, 0, 0, 0] };
+  const btRaw = { id: 'Wireless Controller (Vendor: 054c Product: 09cc)', connected: true, mapping: '', axes: [0, 0, 0, 0] };
+  const xinput = {
+    id: 'Xbox 360 Controller (XInput STANDARD GAMEPAD)',
+    connected: true,
+    mapping: 'standard',
+    axes: [0, 0, 0, 0],
+  };
+
+  assert.equal(pickPrimaryGamepad([null, disconnected]), null);
+  assert.equal(pickPrimaryGamepad([disconnected, btRaw]), btRaw);
+  assert.equal(pickPrimaryGamepad([btRaw, xinput]), xinput);
+  assert.equal(formatGamepadLabel(xinput.id), 'Xbox 360 Controller');
+  assert.equal(formatGamepadLabel(btRaw.id), 'Wireless Controller');
+});
+
+test('crash animation tumbles mid-air drone, breaks propellers, bounces on ground, and completes cleanly', () => {
+  const crashedState = createInitialDroneState();
+  crashedState.onGround = false;
+  crashedState.crashed = true;
+  crashedState.position = { x: 0, y: 12, z: -20 };
+  crashedState.velocity = { x: 2, y: -1, z: -11 };
+
+  const started = initCrashTumble(crashedState);
+  let drone = started.drone;
+  let tumble = started.tumble;
+
+  assert.equal(tumble.active, true);
+  assert.equal(drone.armed, false);
+  assert.equal(drone.motorPower, 0);
+  assert.ok(tumble.brokenProps.filter(Boolean).length >= 2, 'Expected at least 2 broken propellers');
+
+  const initialPitch = drone.pitch;
+  const initialRoll = drone.roll;
+  let finished = false;
+  let minGroundY = Number.POSITIVE_INFINITY;
+
+  // Step 1.3s at 60Hz
+  for (let i = 0; i < 80; i++) {
+    const res = stepCrashTumble(drone, tumble, 1 / 60);
+    drone = res.drone;
+    tumble = res.tumble;
+    minGroundY = Math.min(minGroundY, drone.position.y);
+    if (res.finished) finished = true;
+  }
+
+  assert.ok(tumble.elapsedSec >= CRASH_ANIMATION_DURATION_SEC);
+  assert.equal(finished, true, 'Expected crash tumble sequence to finish after duration');
+  assert.ok(
+    Math.abs(drone.pitch - initialPitch) > 1.0 && Math.abs(drone.roll - initialRoll) > 1.0,
+    'Expected visible tumble rotation across pitch and roll'
+  );
+  const floorY = surfaceHeightAt(drone.position.x, drone.position.z, drone.position.y);
+  assert.ok(drone.position.y >= floorY + 0.14, 'Expected crashed drone never to sink below terrain');
 });

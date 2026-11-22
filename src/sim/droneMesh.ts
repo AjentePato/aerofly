@@ -6,6 +6,8 @@ export interface DroneRig {
   propBlurDiscs: THREE.Mesh[];
   frontLeds: THREE.Mesh[];
   rearLeds: THREE.Mesh[];
+  frontLedMat: THREE.MeshStandardMaterial;
+  rearLedMat: THREE.MeshStandardMaterial;
   gimbalHead: THREE.Group;
   fpvMount: THREE.Object3D;
   contactShadow: THREE.Mesh;
@@ -251,6 +253,8 @@ export function createDroneMesh(): DroneRig {
     propBlurDiscs,
     frontLeds,
     rearLeds,
+    frontLedMat,
+    rearLedMat,
     gimbalHead,
     fpvMount,
     contactShadow,
