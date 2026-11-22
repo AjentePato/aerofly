@@ -571,7 +571,7 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
                       }`}
                     >
                       <Zap className="w-3 h-3" />
-                      {p2pConnected ? 'P2P' : 'WS'}
+                      {p2pConnected ? 'Direta' : 'Rede'}
                     </span>
                   </>
                 ) : (

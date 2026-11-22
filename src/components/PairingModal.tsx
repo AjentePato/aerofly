@@ -138,9 +138,9 @@ export function PairingModal({
                 {controllerCount > 0 && (
                   <div className="text-[10px] font-mono mt-0.5 text-slate-400">
                     {p2pConnected ? (
-                      <span className="text-emerald-400">Direto P2P (Ultra Rápido)</span>
+                      <span className="text-emerald-400">Conexão Direta (Ultra Rápida)</span>
                     ) : (
-                      <span className="text-sky-400">Modo Binário WS</span>
+                      <span className="text-sky-400">Conexão via Rede</span>
                     )}
                   </div>
                 )}
