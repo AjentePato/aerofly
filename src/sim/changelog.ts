@@ -24,6 +24,27 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: 'V1.4.1',
+    title: 'Resposta Instantânea no Controle do Celular (P2P + Binário)',
+    summary:
+      'Otimização profunda de latência e uso de CPU no controle virtual do celular, eliminando atrasos em servidores gratuitos como Render.com.',
+    kind: 'fix',
+    changes: [
+      {
+        category: 'Novo',
+        text: 'Conexão direta WebRTC P2P (DataChannel UDP sem retransmissão/bloqueio) entre celular e PC para resposta instantânea na rede local sem passar pelo servidor após o pareamento.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'Protocolo binário compacto de 9 bytes com envio imediato ao mover os sticks, proteção anti-fila (backpressure), TCP_NODELAY e desativação de compressão no servidor WebSocket.',
+      },
+      {
+        category: 'Correção',
+        text: 'Eliminadas re-renderizações React de 50-120Hz no PC e no toque do celular, além de otimização do terreno, sombras e raycast da câmera para manter FPS estável.',
+      },
+    ],
+  },
+  {
     version: 'V1.4',
     title: 'Central de Novidades e Versionamento',
     summary:

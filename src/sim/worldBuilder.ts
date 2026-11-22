@@ -184,9 +184,9 @@ export function buildTrainingWorld(
   sunLight.position.copy(sunVec).multiplyScalar(140);
   sunLight.castShadow = !isSoftwareGl;
   if (!isSoftwareGl) {
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
-    const d = 115;
+    sunLight.shadow.mapSize.width = 1536;
+    sunLight.shadow.mapSize.height = 1536;
+    const d = 95;
     sunLight.shadow.camera.left = -d;
     sunLight.shadow.camera.right = d;
     sunLight.shadow.camera.top = d;
@@ -205,7 +205,7 @@ export function buildTrainingWorld(
 
   // 3. Open-World Procedural Terrain (1360m x 1360m expansive valley + continuous mountain horizon)
   const terrainSize = 1360;
-  const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, 200, 200);
+  const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, 140, 140);
   terrainGeo.rotateX(-Math.PI / 2);
 
   const posAttr = terrainGeo.attributes.position;
@@ -602,6 +602,7 @@ export function buildTrainingWorld(
     mesh.receiveShadow = true;
     structureGroup.add(mesh);
     if (part.solid) {
+      mesh.userData.cullRadius = Math.hypot(part.hx, part.hy, part.hz);
       environmentColliders.push(mesh);
     }
   }

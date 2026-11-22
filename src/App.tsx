@@ -8,6 +8,8 @@ import { ChangelogModal } from './components/ChangelogModal';
 import { MobileController } from './components/MobileController';
 import { MISSIONS, createInitialMissionProgress, getMissionById } from './sim/missions';
 import { readBrowserGamepad, type GamepadStatus } from './sim/gamepad';
+import { decodeBinaryStick } from './sim/stickProtocol';
+import { RTC_CONFIG, RTC_STICK_CHANNEL_OPTIONS } from './sim/webrtcConfig';
 import type {
   CameraMode,
   DronePhysicsState,
@@ -75,6 +77,7 @@ export default function App() {
   const [showChangelog, setShowChangelog] = useState(false);
 
   const [controllerCount, setControllerCount] = useState(0);
+  const [p2pConnected, setP2pConnected] = useState(false);
   const [gamepadStatus, setGamepadStatus] = useState<GamepadStatus>(() => readBrowserGamepad().status);
   const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
   const [remotePreview, setRemotePreview] = useState<StickInput>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
@@ -127,9 +130,19 @@ export default function App() {
     setPhase((p) => (p === 'playing' ? 'paused' : p === 'paused' ? 'playing' : p));
   }, []);
 
-  // PC Simulator WebSocket Client for receiving phone virtual controller commands
+  // Refs so incoming WS/WebRTC events never force effect teardown or trigger 50Hz React renders
   const latestTelemetryRef = useRef(telemetry);
   latestTelemetryRef.current = telemetry;
+  const showPairingRef = useRef(showPairing);
+  showPairingRef.current = showPairing;
+  const controllerCountRef = useRef(controllerCount);
+  controllerCountRef.current = controllerCount;
+  const cycleCameraRef = useRef(cycleCamera);
+  cycleCameraRef.current = cycleCamera;
+  const cycleFlightModeRef = useRef(cycleFlightMode);
+  cycleFlightModeRef.current = cycleFlightMode;
+  const handleResetRef = useRef(handleReset);
+  handleResetRef.current = handleReset;
 
   useEffect(() => {
     if (isMobileView || typeof window === 'undefined' || !window.location.protocol.startsWith('http')) {
@@ -141,12 +154,164 @@ export default function App() {
     let ws: WebSocket | null = null;
     let reconnectTimer = 0;
     let telemTimer = 0;
+    let lastPreviewEmit = 0;
     let alive = true;
+
+    interface PeerEntry {
+      pc: RTCPeerConnection;
+      dc: RTCDataChannel | null;
+      pendingIce: RTCIceCandidateInit[];
+      remoteDescSet: boolean;
+    }
+    const peers = new Map<string, PeerEntry>();
+
+    const recomputeP2pState = () => {
+      if (!alive) return;
+      let anyOpen = false;
+      for (const entry of peers.values()) {
+        if (entry.dc && entry.dc.readyState === 'open') {
+          anyOpen = true;
+          break;
+        }
+      }
+      setP2pConnected(anyOpen);
+    };
+
+    const closePeer = (id: string) => {
+      const entry = peers.get(id);
+      if (!entry) return;
+      try {
+        entry.dc?.close();
+      } catch {
+        // Ignore cleanup errors
+      }
+      try {
+        entry.pc.close();
+      } catch {
+        // Ignore cleanup errors
+      }
+      peers.delete(id);
+      recomputeP2pState();
+    };
+
+    const closeAllPeers = () => {
+      for (const id of Array.from(peers.keys())) {
+        closePeer(id);
+      }
+    };
+
+    const applyIncomingStick = (nextStick: StickInput) => {
+      remoteStickRef.current = nextStick;
+      remoteActiveRef.current = true;
+      if (showPairingRef.current) {
+        const now = performance.now();
+        if (
+          now - lastPreviewEmit >= 65 ||
+          (nextStick.throttle === 0 && nextStick.yaw === 0 && nextStick.pitch === 0 && nextStick.roll === 0)
+        ) {
+          lastPreviewEmit = now;
+          setRemotePreview(nextStick);
+        }
+      }
+    };
+
+    const handleBinaryPayload = (raw: unknown) => {
+      if (raw instanceof ArrayBuffer) {
+        const decoded = decodeBinaryStick(raw);
+        if (decoded) applyIncomingStick(decoded);
+      } else if (ArrayBuffer.isView(raw)) {
+        const decoded = decodeBinaryStick(raw);
+        if (decoded) applyIncomingStick(decoded);
+      } else if (raw instanceof Blob) {
+        raw
+          .arrayBuffer()
+          .then((buf) => {
+            if (!alive) return;
+            const decoded = decodeBinaryStick(buf);
+            if (decoded) applyIncomingStick(decoded);
+          })
+          .catch(() => {});
+      }
+    };
+
+    const startPeerOffer = async (targetId: string) => {
+      if (typeof RTCPeerConnection === 'undefined' || peers.has(targetId)) return;
+      try {
+        const pc = new RTCPeerConnection(RTC_CONFIG);
+        const dc = pc.createDataChannel('sticks', RTC_STICK_CHANNEL_OPTIONS);
+        dc.binaryType = 'arraybuffer';
+
+        const entry: PeerEntry = { pc, dc, pendingIce: [], remoteDescSet: false };
+        peers.set(targetId, entry);
+
+        dc.onopen = () => recomputeP2pState();
+        dc.onclose = () => recomputeP2pState();
+        dc.onerror = () => recomputeP2pState();
+        dc.onmessage = (evt) => {
+          if (typeof evt.data === 'string') {
+            try {
+              const parsed = JSON.parse(evt.data) as {
+                type?: string;
+                throttle?: number;
+                yaw?: number;
+                pitch?: number;
+                roll?: number;
+              };
+              if (parsed.type === 'stick') {
+                applyIncomingStick({
+                  throttle: Number(parsed.throttle ?? 0),
+                  yaw: Number(parsed.yaw ?? 0),
+                  pitch: Number(parsed.pitch ?? 0),
+                  roll: Number(parsed.roll ?? 0),
+                });
+              }
+            } catch {
+              // Ignore malformed JSON on DC
+            }
+          } else {
+            handleBinaryPayload(evt.data);
+          }
+        };
+
+        pc.onicecandidate = (evt) => {
+          if (evt.candidate && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                type: 'rtc:ice',
+                targetId,
+                candidate: evt.candidate.toJSON(),
+              })
+            );
+          }
+        };
+
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+            closePeer(targetId);
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        if (alive && ws && ws.readyState === WebSocket.OPEN && pc.localDescription) {
+          ws.send(
+            JSON.stringify({
+              type: 'rtc:offer',
+              targetId,
+              sdp: pc.localDescription.toJSON(),
+            })
+          );
+        }
+      } catch {
+        closePeer(targetId);
+      }
+    };
 
     const connect = () => {
       if (!alive) return;
       try {
         ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+        ws.binaryType = 'arraybuffer';
       } catch {
         setServerAvailable(false);
         return;
@@ -157,16 +322,26 @@ export default function App() {
         ws?.send(JSON.stringify({ type: 'register', role: 'sim', room: roomCode }));
       };
 
-      ws.onmessage = (evt) => {
+      ws.onmessage = async (evt) => {
+        // Fast path: 9-byte binary stick packet
+        if (typeof evt.data !== 'string') {
+          handleBinaryPayload(evt.data);
+          return;
+        }
+
         try {
-          const msg = JSON.parse(evt.data as string) as {
+          const msg = JSON.parse(evt.data) as {
             type: string;
+            fromId?: string;
             controllerCount?: number;
+            controllerIds?: string[];
             throttle?: number;
             yaw?: number;
             pitch?: number;
             roll?: number;
             action?: string;
+            sdp?: RTCSessionDescriptionInit;
+            candidate?: RTCIceCandidateInit;
           };
 
           if (msg.type === 'room:status') {
@@ -175,28 +350,57 @@ export default function App() {
             remoteActiveRef.current = count > 0;
             if (count === 0) {
               remoteStickRef.current = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
+              if (showPairingRef.current) {
+                setRemotePreview(remoteStickRef.current);
+              }
+            }
+
+            // Reconcile WebRTC peer connections for active controllers
+            const activeIds = new Set(msg.controllerIds ?? []);
+            for (const existingId of Array.from(peers.keys())) {
+              if (!activeIds.has(existingId)) closePeer(existingId);
+            }
+            for (const id of activeIds) {
+              if (!peers.has(id)) void startPeerOffer(id);
             }
           } else if (msg.type === 'stick') {
-            const nextStick: StickInput = {
+            applyIncomingStick({
               throttle: Number(msg.throttle ?? 0),
               yaw: Number(msg.yaw ?? 0),
               pitch: Number(msg.pitch ?? 0),
               roll: Number(msg.roll ?? 0),
-            };
-            remoteStickRef.current = nextStick;
-            remoteActiveRef.current = true;
-            setRemotePreview(nextStick);
+            });
           } else if (msg.type === 'action') {
-            if (msg.action === 'cycle_camera') cycleCamera();
-            else if (msg.action === 'cycle_mode') cycleFlightMode();
-            else if (msg.action === 'reset') handleReset();
+            if (msg.action === 'cycle_camera') cycleCameraRef.current();
+            else if (msg.action === 'cycle_mode') cycleFlightModeRef.current();
+            else if (msg.action === 'reset') handleResetRef.current();
+          } else if (msg.type === 'rtc:answer' && msg.fromId && msg.sdp) {
+            const entry = peers.get(msg.fromId);
+            if (entry) {
+              await entry.pc.setRemoteDescription(msg.sdp);
+              entry.remoteDescSet = true;
+              for (const cand of entry.pendingIce) {
+                await entry.pc.addIceCandidate(cand);
+              }
+              entry.pendingIce.length = 0;
+            }
+          } else if (msg.type === 'rtc:ice' && msg.fromId && msg.candidate) {
+            const entry = peers.get(msg.fromId);
+            if (entry) {
+              if (entry.remoteDescSet) {
+                await entry.pc.addIceCandidate(msg.candidate);
+              } else {
+                entry.pendingIce.push(msg.candidate);
+              }
+            }
           }
         } catch {
-          // Ignore malformed WS message
+          // Ignore malformed WS or SDP/ICE message
         }
       };
 
       ws.onclose = () => {
+        closeAllPeers();
         if (alive) {
           reconnectTimer = window.setTimeout(connect, 2200);
         }
@@ -213,10 +417,15 @@ export default function App() {
           setServerAvailable(true);
           connect();
           telemTimer = window.setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
+            if (
+              controllerCountRef.current > 0 &&
+              ws &&
+              ws.readyState === WebSocket.OPEN &&
+              ws.bufferedAmount < 2048
+            ) {
               ws.send(JSON.stringify({ type: 'telemetry', telemetry: latestTelemetryRef.current }));
             }
-          }, 150);
+          }, 200);
         } else {
           setServerAvailable(false);
         }
@@ -229,9 +438,10 @@ export default function App() {
       alive = false;
       clearTimeout(reconnectTimer);
       clearInterval(telemTimer);
+      closeAllPeers();
       ws?.close();
     };
-  }, [isMobileView, roomCode, cycleCamera, cycleFlightMode, handleReset]);
+  }, [isMobileView, roomCode]);
 
   const handleSelectMission = useCallback((id: MissionId) => {
     setMissionId(id);
@@ -395,6 +605,7 @@ export default function App() {
         <PairingModal
           roomCode={roomCode}
           controllerCount={controllerCount}
+          p2pConnected={p2pConnected}
           serverAvailable={serverAvailable !== false}
           remoteSticks={remotePreview}
           onClose={() => setShowPairing(false)}

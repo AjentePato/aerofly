@@ -64,6 +64,7 @@ const _fpvTiltQuat = new THREE.Quaternion();
 const _camRayOrigin = new THREE.Vector3();
 const _camRayDir = new THREE.Vector3();
 const _camRaycaster = new THREE.Raycaster();
+const _nearbyColliders: THREE.Object3D[] = [];
 
 export function DroneCanvas(props: SimBridgeProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -91,7 +92,7 @@ export function DroneCanvas(props: SimBridgeProps) {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;
-    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 1.5));
     renderer.shadowMap.enabled = !isSoftwareGl;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setSize(container.clientWidth || window.innerWidth, container.clientHeight || window.innerHeight);
@@ -532,18 +533,28 @@ export function DroneCanvas(props: SimBridgeProps) {
             _camDesiredPos.y = camGround + 0.85;
           }
 
-          // Pull Chase Cam forward before clipping through building/hangar/ruin walls
+          // Pull Chase Cam forward before clipping through nearby building/hangar/ruin walls
           _camRayOrigin.set(droneState.position.x, droneState.position.y + 0.25, droneState.position.z);
           _camRayDir.subVectors(_camDesiredPos, _camRayOrigin);
           const camDist = _camRayDir.length();
           if (camDist > 0.2 && world.environmentColliders.length > 0) {
-            _camRayDir.divideScalar(camDist);
-            _camRaycaster.set(_camRayOrigin, _camRayDir);
-            _camRaycaster.far = camDist;
-            const hits = _camRaycaster.intersectObjects(world.environmentColliders, false);
-            if (hits.length > 0) {
-              const safeDist = Math.max(0.9, hits[0].distance - 0.35);
-              _camDesiredPos.copy(_camRayOrigin).addScaledVector(_camRayDir, safeDist);
+            _nearbyColliders.length = 0;
+            for (let i = 0; i < world.environmentColliders.length; i++) {
+              const col = world.environmentColliders[i];
+              const maxR = ((col.userData.cullRadius as number) || 8) + camDist + 1.0;
+              if (col.position.distanceToSquared(_camRayOrigin) <= maxR * maxR) {
+                _nearbyColliders.push(col);
+              }
+            }
+            if (_nearbyColliders.length > 0) {
+              _camRayDir.divideScalar(camDist);
+              _camRaycaster.set(_camRayOrigin, _camRayDir);
+              _camRaycaster.far = camDist;
+              const hits = _camRaycaster.intersectObjects(_nearbyColliders, false);
+              if (hits.length > 0) {
+                const safeDist = Math.max(0.9, hits[0].distance - 0.35);
+                _camDesiredPos.copy(_camRayOrigin).addScaledVector(_camRayDir, safeDist);
+              }
             }
           }
 

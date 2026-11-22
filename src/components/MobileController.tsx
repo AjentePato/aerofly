@@ -1,12 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
-import { Camera, Compass, RotateCcw, Wifi, WifiOff, ArrowLeft } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Camera, Compass, RotateCcw, Wifi, WifiOff, ArrowLeft, Zap } from 'lucide-react';
 import {
   computeFloatingStickOrigin,
   computeFloatingStickValue,
   type FloatingOrigin,
   type StickVec,
 } from '../sim/floatingStick';
-import type { DroneTelemetry } from '../sim/types';
+import {
+  STICK_PACKET_BYTES,
+  encodeBinaryStickInto,
+  pickRelayTransport,
+  sticksChangedSignificantly,
+} from '../sim/stickProtocol';
+import { RTC_CONFIG } from '../sim/webrtcConfig';
+import type { DroneTelemetry, StickInput } from '../sim/types';
 
 interface MobileControllerProps {
   initialRoom: string;
@@ -14,31 +21,72 @@ interface MobileControllerProps {
 }
 
 const STICK_RADIUS_PX = 68;
+const MIN_SEND_INTERVAL_MS = 12; // ~83Hz max rate; 0 packets when idle
 
 function FloatingTouchZone({
   label,
   subLabel,
-  value,
   stickyY,
   side,
-  onChange,
+  onStickSample,
 }: {
   label: string;
   subLabel: string;
-  value: StickVec;
   stickyY?: boolean;
   side: 'left' | 'right';
-  onChange: (pos: StickVec) => void;
+  onStickSample: (pos: StickVec, immediate: boolean) => void;
 }) {
   const zoneRef = useRef<HTMLDivElement | null>(null);
+  const knobRef = useRef<HTMLDivElement | null>(null);
+  const readoutRef = useRef<HTMLDivElement | null>(null);
+  const rectRef = useRef<DOMRect | null>(null);
   const pointerIdRef = useRef<number | null>(null);
   const originRef = useRef<FloatingOrigin | null>(null);
+  const valueRef = useRef<StickVec>({ x: 0, y: 0 });
+  const lastReadoutMsRef = useRef(0);
+  const readoutTimerRef = useRef(0);
   const [activeOrigin, setActiveOrigin] = useState<FloatingOrigin | null>(null);
 
+  const syncVisuals = (pos: StickVec, forceReadout: boolean) => {
+    if (knobRef.current) {
+      const dx = pos.x * STICK_RADIUS_PX;
+      const dy = -pos.y * STICK_RADIUS_PX;
+      knobRef.current.style.transform = `translate3d(calc(-50% + ${dx}px), calc(-50% + ${dy}px), 0)`;
+    }
+    const now = performance.now();
+    const writeReadout = (v: StickVec) => {
+      if (readoutRef.current) {
+        readoutRef.current.textContent = `${subLabel} · ${Math.round(v.x * 100)}% / ${Math.round(v.y * 100)}%`;
+      }
+    };
+    if (forceReadout || now - lastReadoutMsRef.current >= 65) {
+      if (readoutTimerRef.current) {
+        clearTimeout(readoutTimerRef.current);
+        readoutTimerRef.current = 0;
+      }
+      lastReadoutMsRef.current = now;
+      writeReadout(pos);
+    } else if (!readoutTimerRef.current) {
+      const wait = Math.max(8, 65 - (now - lastReadoutMsRef.current));
+      readoutTimerRef.current = window.setTimeout(() => {
+        readoutTimerRef.current = 0;
+        lastReadoutMsRef.current = performance.now();
+        writeReadout(valueRef.current);
+      }, wait);
+    }
+  };
+
+  // Sync newly mounted knob position right after activeOrigin flips on pointerdown
+  useEffect(() => {
+    if (activeOrigin) {
+      syncVisuals(valueRef.current, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrigin]);
+
   const toLocalCoords = (clientX: number, clientY: number) => {
-    const el = zoneRef.current;
-    if (!el) return { x: 0, y: 0 };
-    const rect = el.getBoundingClientRect();
+    const rect = rectRef.current ?? zoneRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 0, y: 0 };
     return {
       x: clientX - rect.left,
       y: clientY - rect.top,
@@ -50,12 +98,13 @@ function FloatingTouchZone({
     if (pointerIdRef.current !== null) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     pointerIdRef.current = e.pointerId;
+    rectRef.current = e.currentTarget.getBoundingClientRect();
 
     const local = toLocalCoords(e.clientX, e.clientY);
     const origin = computeFloatingStickOrigin(
       local.x,
       local.y,
-      value,
+      valueRef.current,
       STICK_RADIUS_PX,
       Boolean(stickyY)
     );
@@ -63,11 +112,13 @@ function FloatingTouchZone({
     setActiveOrigin(origin);
 
     const nextVal = computeFloatingStickValue(local.x, local.y, origin, STICK_RADIUS_PX);
-    onChange(nextVal);
+    valueRef.current = nextVal;
+    syncVisuals(nextVal, true);
+    onStickSample(nextVal, true);
 
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
-        navigator.vibrate(8);
+        navigator.vibrate(6);
       } catch {
         // Ignore unsupported vibrate
       }
@@ -83,22 +134,26 @@ function FloatingTouchZone({
       originRef.current,
       STICK_RADIUS_PX
     );
-    onChange(nextVal);
+    valueRef.current = nextVal;
+    syncVisuals(nextVal, false);
+    onStickSample(nextVal, false);
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (pointerIdRef.current !== e.pointerId) return;
     pointerIdRef.current = null;
     originRef.current = null;
+    rectRef.current = null;
     setActiveOrigin(null);
-    onChange({
-      x: 0,
-      y: stickyY ? value.y : 0,
-    });
-  };
 
-  const knobOffsetX = value.x * STICK_RADIUS_PX;
-  const knobOffsetY = -value.y * STICK_RADIUS_PX;
+    const releaseVal: StickVec = {
+      x: 0,
+      y: stickyY ? valueRef.current.y : 0,
+    };
+    valueRef.current = releaseVal;
+    syncVisuals(releaseVal, true);
+    onStickSample(releaseVal, true);
+  };
 
   return (
     <div
@@ -143,11 +198,12 @@ function FloatingTouchZone({
           <div className="absolute inset-y-3 left-1/2 w-px bg-slate-600/60" />
           <div className="absolute inset-5 rounded-full border border-slate-700/60" />
 
-          {/* Moving thumb knob */}
+          {/* Moving thumb knob — updated via direct transform3d without React re-renders */}
           <div
-            className="absolute left-1/2 top-1/2 w-12 h-12 rounded-full bg-amber-500 border-4 border-slate-950 shadow-lg flex items-center justify-center"
+            ref={knobRef}
+            className="absolute left-1/2 top-1/2 w-12 h-12 rounded-full bg-amber-500 border-4 border-slate-950 shadow-lg flex items-center justify-center will-change-transform"
             style={{
-              transform: `translate(calc(-50% + ${knobOffsetX}px), calc(-50% + ${knobOffsetY}px))`,
+              transform: 'translate3d(-50%, -50%, 0)',
             }}
           >
             <div className="w-3.5 h-3.5 rounded-full bg-amber-200/80" />
@@ -158,8 +214,8 @@ function FloatingTouchZone({
       {/* Bottom Axis Label & Live Value */}
       <div className="pointer-events-none text-center px-2">
         <div className="text-xs font-display font-bold text-slate-200">{label}</div>
-        <div className="text-[11px] font-mono text-slate-400 tabular-nums">
-          {subLabel} · {Math.round(value.x * 100)}% / {Math.round(value.y * 100)}%
+        <div ref={readoutRef} className="text-[11px] font-mono text-slate-400 tabular-nums">
+          {subLabel} · 0% / 0%
         </div>
       </div>
     </div>
@@ -171,39 +227,214 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
   const [activeRoom, setActiveRoom] = useState(initialRoom.toUpperCase());
   const [wsConnected, setWsConnected] = useState(false);
   const [simOnline, setSimOnline] = useState(false);
-  const [leftStick, setLeftStick] = useState<StickVec>({ x: 0, y: 0 });
-  const [rightStick, setRightStick] = useState<StickVec>({ x: 0, y: 0 });
+  const [p2pConnected, setP2pConnected] = useState(false);
   const [stickyThrottle, setStickyThrottle] = useState(false);
   const [gyroEnabled, setGyroEnabled] = useState(false);
   const [telemetry, setTelemetry] = useState<DroneTelemetry | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const sticksRef = useRef({ left: leftStick, right: rightStick });
-  sticksRef.current = { left: leftStick, right: rightStick };
+  const dcRef = useRef<RTCDataChannel | null>(null);
+  const sticksRef = useRef<StickInput>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
+  const lastSentRef = useRef<StickInput>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
+  const lastSendMsRef = useRef(0);
+  const trailingTimerRef = useRef<number>(0);
+  const txBufRef = useRef<Uint8Array<ArrayBuffer>>(
+    new Uint8Array(new ArrayBuffer(STICK_PACKET_BYTES))
+  );
+
+  const flushTransmit = useCallback((force: boolean) => {
+    const dc = dcRef.current;
+    const ws = wsRef.current;
+    const transport = pickRelayTransport(dc?.readyState, ws?.readyState);
+    if (transport === 'none') return;
+
+    const current = sticksRef.current;
+    if (!force && !sticksChangedSignificantly(current, lastSentRef.current)) {
+      return;
+    }
+
+    const now = performance.now();
+    if (!force && now - lastSendMsRef.current < MIN_SEND_INTERVAL_MS) {
+      if (!trailingTimerRef.current) {
+        const wait = Math.max(2, MIN_SEND_INTERVAL_MS - (now - lastSendMsRef.current));
+        trailingTimerRef.current = window.setTimeout(() => {
+          trailingTimerRef.current = 0;
+          flushTransmit(true);
+        }, wait);
+      }
+      return;
+    }
+
+    if (trailingTimerRef.current) {
+      clearTimeout(trailingTimerRef.current);
+      trailingTimerRef.current = 0;
+    }
+
+    // Backpressure guard: drop stale intermediate frames instead of queueing TCP lag
+    if (transport === 'webrtc') {
+      if (!dc || dc.bufferedAmount > 512) return;
+      const packet = encodeBinaryStickInto(current, txBufRef.current);
+      dc.send(packet);
+    } else {
+      if (!ws || ws.bufferedAmount > 512) return;
+      const packet = encodeBinaryStickInto(current, txBufRef.current);
+      ws.send(packet);
+    }
+
+    lastSentRef.current = { ...current };
+    lastSendMsRef.current = now;
+  }, []);
+
+  const handleLeftStickSample = useCallback(
+    (pos: StickVec, immediate: boolean) => {
+      sticksRef.current.throttle = pos.y;
+      sticksRef.current.yaw = pos.x;
+      flushTransmit(immediate);
+    },
+    [flushTransmit]
+  );
+
+  const handleRightStickSample = useCallback(
+    (pos: StickVec, immediate: boolean) => {
+      sticksRef.current.pitch = pos.y;
+      sticksRef.current.roll = pos.x;
+      flushTransmit(immediate);
+    },
+    [flushTransmit]
+  );
 
   useEffect(() => {
     if (!activeRoom) return;
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${proto}//${window.location.host}/ws`);
+    ws.binaryType = 'arraybuffer';
     wsRef.current = ws;
+
+    let pc: RTCPeerConnection | null = null;
+    const pendingIce: RTCIceCandidateInit[] = [];
+    let remoteDescSet = false;
+    let alive = true;
+
+    const cleanupPeer = () => {
+      if (dcRef.current) {
+        try {
+          dcRef.current.close();
+        } catch {
+          // Ignore close error
+        }
+        dcRef.current = null;
+      }
+      if (pc) {
+        try {
+          pc.close();
+        } catch {
+          // Ignore close error
+        }
+        pc = null;
+      }
+      remoteDescSet = false;
+      pendingIce.length = 0;
+      if (alive) setP2pConnected(false);
+    };
 
     ws.onopen = () => {
       setWsConnected(true);
       ws.send(JSON.stringify({ type: 'register', role: 'controller', room: activeRoom }));
+      flushTransmit(true);
     };
 
-    ws.onmessage = (evt) => {
+    ws.onmessage = async (evt) => {
+      if (typeof evt.data !== 'string') return;
       try {
-        const msg = JSON.parse(evt.data as string) as {
+        const msg = JSON.parse(evt.data) as {
           type: string;
+          fromId?: string;
           simConnected?: boolean;
           telemetry?: DroneTelemetry;
+          sdp?: RTCSessionDescriptionInit;
+          candidate?: RTCIceCandidateInit;
         };
+
         if (msg.type === 'room:status') {
-          setSimOnline(Boolean(msg.simConnected));
+          const online = Boolean(msg.simConnected);
+          setSimOnline(online);
+          if (!online) {
+            cleanupPeer();
+          } else {
+            flushTransmit(true);
+          }
         } else if (msg.type === 'telemetry' && msg.telemetry) {
           setTelemetry(msg.telemetry);
+        } else if (msg.type === 'rtc:offer' && msg.sdp && typeof RTCPeerConnection !== 'undefined') {
+          cleanupPeer();
+          try {
+            pc = new RTCPeerConnection(RTC_CONFIG);
+
+            pc.ondatachannel = (dcEvent) => {
+              const ch = dcEvent.channel;
+              ch.binaryType = 'arraybuffer';
+              dcRef.current = ch;
+              ch.onopen = () => {
+                if (!alive) return;
+                setP2pConnected(true);
+                flushTransmit(true);
+              };
+              ch.onclose = () => {
+                if (dcRef.current === ch) dcRef.current = null;
+                if (alive) setP2pConnected(false);
+              };
+              ch.onerror = () => {
+                if (dcRef.current === ch) dcRef.current = null;
+                if (alive) setP2pConnected(false);
+              };
+            };
+
+            pc.onicecandidate = (iceEvent) => {
+              if (iceEvent.candidate && ws.readyState === WebSocket.OPEN) {
+                ws.send(
+                  JSON.stringify({
+                    type: 'rtc:ice',
+                    targetId: msg.fromId,
+                    candidate: iceEvent.candidate.toJSON(),
+                  })
+                );
+              }
+            };
+
+            pc.onconnectionstatechange = () => {
+              if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'closed')) {
+                cleanupPeer();
+              }
+            };
+
+            await pc.setRemoteDescription(msg.sdp);
+            remoteDescSet = true;
+            for (const cand of pendingIce) {
+              await pc.addIceCandidate(cand);
+            }
+            pendingIce.length = 0;
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            if (alive && ws.readyState === WebSocket.OPEN && pc.localDescription) {
+              ws.send(
+                JSON.stringify({
+                  type: 'rtc:answer',
+                  targetId: msg.fromId,
+                  sdp: pc.localDescription.toJSON(),
+                })
+              );
+            }
+          } catch {
+            cleanupPeer();
+          }
+        } else if (msg.type === 'rtc:ice' && msg.candidate && pc) {
+          if (remoteDescSet) {
+            await pc.addIceCandidate(msg.candidate);
+          } else {
+            pendingIce.push(msg.candidate);
+          }
         }
       } catch {
         // Ignore malformed packets
@@ -211,31 +442,34 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
     };
 
     ws.onclose = () => {
-      setWsConnected(false);
-      setSimOnline(false);
+      cleanupPeer();
+      if (alive) {
+        setWsConnected(false);
+        setSimOnline(false);
+      }
     };
 
-    const timer = window.setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) {
-        const { left, right } = sticksRef.current;
-        ws.send(
-          JSON.stringify({
-            type: 'stick',
-            throttle: left.y,
-            yaw: left.x,
-            pitch: right.y,
-            roll: right.x,
-          })
-        );
+    // Low-overhead keepalive ONLY if sticks are actively held away from center and idle > 260ms
+    const keepaliveTimer = window.setInterval(() => {
+      const s = sticksRef.current;
+      const nonZero = s.throttle !== 0 || s.yaw !== 0 || s.pitch !== 0 || s.roll !== 0;
+      if (nonZero && performance.now() - lastSendMsRef.current >= 260) {
+        flushTransmit(true);
       }
-    }, 20);
+    }, 280);
 
     return () => {
-      clearInterval(timer);
+      alive = false;
+      clearInterval(keepaliveTimer);
+      if (trailingTimerRef.current) {
+        clearTimeout(trailingTimerRef.current);
+        trailingTimerRef.current = 0;
+      }
+      cleanupPeer();
       ws.close();
       wsRef.current = null;
     };
-  }, [activeRoom]);
+  }, [activeRoom, flushTransmit]);
 
   useEffect(() => {
     if (!gyroEnabled) return;
@@ -243,11 +477,11 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
       if (e.beta === null || e.gamma === null) return;
       const roll = Math.max(-1, Math.min(1, e.gamma / 30));
       const pitch = Math.max(-1, Math.min(1, (35 - e.beta) / 30));
-      setRightStick({ x: roll, y: pitch });
+      handleRightStickSample({ x: roll, y: pitch }, false);
     };
     window.addEventListener('deviceorientation', onOrient);
     return () => window.removeEventListener('deviceorientation', onOrient);
-  }, [gyroEnabled]);
+  }, [gyroEnabled, handleRightStickSample]);
 
   const sendAction = (action: string) => {
     const ws = wsRef.current;
@@ -325,11 +559,21 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
           <div className="min-w-0">
             <div className="flex items-center gap-2 whitespace-nowrap">
               <span className="font-display font-bold text-sm text-white">TX · {activeRoom}</span>
-              <span className="text-xs font-mono flex items-center gap-1">
+              <span className="text-xs font-mono flex items-center gap-1.5">
                 {wsConnected && simOnline ? (
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <Wifi className="w-3.5 h-3.5" /> PC Conectado
-                  </span>
+                  <>
+                    <span className="text-emerald-400 flex items-center gap-1">
+                      <Wifi className="w-3.5 h-3.5" /> PC Conectado
+                    </span>
+                    <span
+                      className={`inline-flex items-center gap-0.5 text-[10px] font-semibold ${
+                        p2pConnected ? 'text-emerald-300' : 'text-sky-300'
+                      }`}
+                    >
+                      <Zap className="w-3 h-3" />
+                      {p2pConnected ? 'P2P' : 'WS'}
+                    </span>
+                  </>
                 ) : (
                   <span className="text-amber-400 flex items-center gap-1">
                     <WifiOff className="w-3.5 h-3.5" /> Aguardando PC
@@ -380,17 +624,15 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
           side="left"
           label="Stick Esquerdo"
           subLabel="Acelerador / Yaw"
-          value={leftStick}
           stickyY={stickyThrottle}
-          onChange={setLeftStick}
+          onStickSample={handleLeftStickSample}
         />
 
         <FloatingTouchZone
           side="right"
           label="Stick Direito"
           subLabel="Pitch / Roll"
-          value={rightStick}
-          onChange={setRightStick}
+          onStickSample={handleRightStickSample}
         />
       </div>
 

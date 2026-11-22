@@ -13,7 +13,9 @@ Simulador 3D de voo e treinamento para drones quadricópteros construído com Re
 - `src/sim/crashAnimation.ts`: Física pura da animação pós-colisão (rebote, queda com giro descontrolado/tumble, quique no solo e temporização antes da tela de resultado).
 - `src/sim/crashEffects.ts`: Pool pré-alocado de partículas 3D de colisão (onda de choque, faíscas, fragmentos, hélices soltas e fumaça).
 - `src/sim/changelog.ts`: Histórico oficial de versões (`V1.X` para recursos, `V1.X.Y` para correções) e filtragem das alterações desde a V1.0.
-- `src/sim/worldBuilder.ts`: Construção da cena Three.js (terreno, lago, pistas, estruturas, vegetação, iluminação e visuais de missão).
+- `src/sim/stickProtocol.ts`: Codificação/decodificação binária compacta de 9 bytes (`0x01 + 4x Int16LE`), detecção de variação/retorno imediato ao centro e seleção de transporte (`webrtc` / `ws`).
+- `src/sim/webrtcConfig.ts`: Configuração ICE/STUN e tipos de sinalização para canal direto P2P (`RTCDataChannel` não ordenado e sem retransmissão).
+- `src/sim/worldBuilder.ts`: Construção da cena Three.js (terreno otimizado, lago, pistas, estruturas com raio de culling para raycast, vegetação, iluminação e visuais de missão).
 - `src/sim/droneMesh.ts`: Rig 3D do drone quadricóptero, hélices, gimbal estabilizado e sombra de contato.
 - `src/sim/audio.ts`: Síntese procedural de motores, portões e colisões via Web Audio API.
 - `src/components/DroneCanvas.tsx`: Loop WebGL/Three.js (`requestAnimationFrame` / `afterDraw` em software GL), amostragem unificada de teclado + celular + gamepad físico e câmeras (`chase`, `fpv`, `los`).
@@ -21,8 +23,8 @@ Simulador 3D de voo e treinamento para drones quadricópteros construído com Re
 - `src/components/ChangelogModal.tsx`: Modal acessível exibindo a linha do tempo detalhada de versões com filtros.
 - `src/components/FlightHUD.tsx`: HUD de voo com objetivo da missão, troca rápida de modo, câmera/som/pausa, status de controle Xbox/DS4, visualizador ao vivo dos sticks Modo 2 e barra de telemetria.
 - `src/components/Modals.tsx`: Modais de pausa (`PauseModal`) e resultado de missão (`OutcomeModal`).
-- `src/components/PairingModal.tsx` & `src/components/MobileController.tsx`: Controle remoto virtual por celular via WebSocket (`/ws`).
-- `server.ts`: Servidor Express + WebSocket para salas de pareamento celular e API `/api/health`.
+- `src/components/PairingModal.tsx` & `src/components/MobileController.tsx`: Controle remoto virtual por celular com toque direto no DOM, envio imediato binário de 9 bytes e upgrade automático para WebRTC P2P.
+- `server.ts`: Servidor Express + WebSocket (`perMessageDeflate: false`, `TCP_NODELAY`) com repasse binário zero-parse, controle de fila e sinalização WebRTC.
 
 ## Mapeamento RC Modo 2 (Controle Xbox / DS4Windows)
 - **Stick Esquerdo Y (`axes[1]` invertido)**: Aceleração (`throttle`: `+1` subir, `-1` descer, centro `0` mantém altitude em GPS/Sport)

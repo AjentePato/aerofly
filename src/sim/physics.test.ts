@@ -28,6 +28,13 @@ import {
   isPatchVersion,
   isValidVersionFormat,
 } from './changelog';
+import {
+  STICK_PACKET_BYTES,
+  decodeBinaryStick,
+  encodeBinaryStick,
+  pickRelayTransport,
+  sticksChangedSignificantly,
+} from './stickProtocol';
 import type { PhysicsConfig, StickInput } from './types';
 
 const neutralInput: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
@@ -509,8 +516,45 @@ test('changelog follows V1.X / V1.X.Y versioning rules and filters cleanly', () 
 
   const fixes = filterChangelogEntries(CHANGELOG_ENTRIES, 'fixes');
   const features = filterChangelogEntries(CHANGELOG_ENTRIES, 'features');
-  assert.ok(fixes.length >= 2);
+  assert.ok(fixes.length >= 3);
   assert.ok(features.length >= 4);
   assert.equal(fixes.length + features.length, CHANGELOG_ENTRIES.length);
 });
+
+test('9-byte binary stick protocol round-trips accurately and rejects invalid packets', () => {
+  const sample: StickInput = { throttle: 0.735, yaw: -0.42, pitch: 1, roll: -1 };
+  const packet = encodeBinaryStick(sample);
+  assert.equal(packet.byteLength, STICK_PACKET_BYTES);
+
+  const decoded = decodeBinaryStick(packet);
+  assert.ok(decoded !== null);
+  assert.ok(Math.abs(decoded.throttle - sample.throttle) < 0.0001);
+  assert.ok(Math.abs(decoded.yaw - sample.yaw) < 0.0001);
+  assert.equal(decoded.pitch, 1);
+  assert.equal(decoded.roll, -1);
+
+  // Neutral zero round-trip
+  const zeroDecoded = decodeBinaryStick(encodeBinaryStick(neutralInput));
+  assert.deepEqual(zeroDecoded, neutralInput);
+
+  // Reject wrong size or header
+  assert.equal(decodeBinaryStick(new Uint8Array(4)), null);
+  const badHeader = encodeBinaryStick(neutralInput);
+  badHeader[0] = 0xff;
+  assert.equal(decodeBinaryStick(badHeader), null);
+});
+
+test('stick change detector always triggers on zero-release and prefers WebRTC P2P when open', () => {
+  const base: StickInput = { throttle: 0.5, yaw: 0.001, pitch: 0, roll: 0 };
+  // Tiny sub-epsilon change is ignored
+  assert.equal(sticksChangedSignificantly({ throttle: 0.5005, yaw: 0.0012, pitch: 0, roll: 0 }, base), false);
+  // Exact return to zero always fires immediately (even from small values!)
+  assert.equal(sticksChangedSignificantly({ throttle: 0.5, yaw: 0, pitch: 0, roll: 0 }, base), true);
+
+  assert.equal(pickRelayTransport('open', 1), 'webrtc');
+  assert.equal(pickRelayTransport('connecting', 1), 'ws');
+  assert.equal(pickRelayTransport(null, 1), 'ws');
+  assert.equal(pickRelayTransport('closed', 3), 'none');
+});
+
 

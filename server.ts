@@ -9,34 +9,49 @@ const __dirname = path.dirname(__filename);
 
 interface RoomState {
   sim: WebSocket | null;
-  controllers: Set<WebSocket>;
+  controllers: Map<string, WebSocket>;
 }
 
 const rooms = new Map<string, RoomState>();
+let nextClientSeq = 1;
 
 function getOrCreateRoom(code: string): RoomState {
   const key = code.toUpperCase();
   let room = rooms.get(key);
   if (!room) {
-    room = { sim: null, controllers: new Set() };
+    room = { sim: null, controllers: new Map() };
     rooms.set(key, room);
   }
   return room;
 }
 
 function broadcastStatus(code: string, room: RoomState) {
-  const statusPayload = JSON.stringify({
-    type: 'room:status',
-    room: code,
-    controllerCount: room.controllers.size,
-    simConnected: Boolean(room.sim && room.sim.readyState === WebSocket.OPEN),
-  });
-  if (room.sim && room.sim.readyState === WebSocket.OPEN) {
-    room.sim.send(statusPayload);
+  const controllerIds = Array.from(room.controllers.keys());
+  const simConnected = Boolean(room.sim && room.sim.readyState === WebSocket.OPEN);
+
+  if (simConnected && room.sim) {
+    room.sim.send(
+      JSON.stringify({
+        type: 'room:status',
+        room: code,
+        controllerCount: room.controllers.size,
+        controllerIds,
+        simConnected: true,
+      })
+    );
   }
-  for (const ctrl of room.controllers) {
+
+  for (const [ctrlId, ctrl] of room.controllers.entries()) {
     if (ctrl.readyState === WebSocket.OPEN) {
-      ctrl.send(statusPayload);
+      ctrl.send(
+        JSON.stringify({
+          type: 'room:status',
+          room: code,
+          clientId: ctrlId,
+          controllerCount: room.controllers.size,
+          simConnected,
+        })
+      );
     }
   }
 }
@@ -44,23 +59,48 @@ function broadcastStatus(code: string, room: RoomState) {
 async function startServer() {
   const app = express();
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    perMessageDeflate: false,
+  });
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    req.socket?.setNoDelay?.(true);
+
+    const clientId = `c${nextClientSeq++}`;
     let joinedRoom = '';
     let role: 'sim' | 'controller' | '' = '';
 
-    ws.on('message', (raw) => {
+    ws.on('message', (raw, isBinary) => {
+      // Zero-copy / zero-JSON binary fast path for 9-byte controller stick frames
+      if (isBinary) {
+        if (role !== 'controller' || !joinedRoom) return;
+        const room = rooms.get(joinedRoom);
+        if (
+          room?.sim &&
+          room.sim.readyState === WebSocket.OPEN &&
+          room.sim.bufferedAmount < 4096
+        ) {
+          room.sim.send(raw, { binary: true });
+        }
+        return;
+      }
+
       try {
-        const msg = JSON.parse(raw.toString()) as {
+        const rawText = raw.toString();
+        const msg = JSON.parse(rawText) as {
           type: string;
           room?: string;
           role?: 'sim' | 'controller';
+          targetId?: string;
           throttle?: number;
           yaw?: number;
           pitch?: number;
           roll?: number;
           action?: string;
+          sdp?: unknown;
+          candidate?: unknown;
           telemetry?: unknown;
         };
 
@@ -72,7 +112,7 @@ async function startServer() {
           if (role === 'sim') {
             room.sim = ws;
           } else {
-            room.controllers.add(ws);
+            room.controllers.set(clientId, ws);
           }
           broadcastStatus(joinedRoom, room);
           return;
@@ -82,20 +122,45 @@ async function startServer() {
         const room = rooms.get(joinedRoom);
         if (!room) return;
 
-        // Relay stick & action packets from phone controller -> PC simulator
+        // Relay stick (JSON fallback) & action packets from phone controller -> PC simulator
         if ((msg.type === 'stick' || msg.type === 'action') && role === 'controller') {
           if (room.sim && room.sim.readyState === WebSocket.OPEN) {
-            room.sim.send(JSON.stringify(msg));
+            if (msg.type !== 'stick' || room.sim.bufferedAmount < 4096) {
+              room.sim.send(rawText);
+            }
+          }
+          return;
+        }
+
+        // Relay WebRTC P2P signaling (offer/answer/ICE) between PC sim and phone controllers
+        if (msg.type === 'rtc:offer' || msg.type === 'rtc:answer' || msg.type === 'rtc:ice') {
+          if (role === 'sim') {
+            const out = JSON.stringify({ ...msg, fromId: 'sim' });
+            if (msg.targetId) {
+              const target = room.controllers.get(msg.targetId);
+              if (target && target.readyState === WebSocket.OPEN) {
+                target.send(out);
+              }
+            } else {
+              for (const ctrl of room.controllers.values()) {
+                if (ctrl.readyState === WebSocket.OPEN) {
+                  ctrl.send(out);
+                }
+              }
+            }
+          } else if (role === 'controller') {
+            if (room.sim && room.sim.readyState === WebSocket.OPEN) {
+              room.sim.send(JSON.stringify({ ...msg, fromId: clientId }));
+            }
           }
           return;
         }
 
         // Relay live telemetry from PC simulator -> connected phone controllers
-        if (msg.type === 'telemetry' && role === 'sim') {
-          const payload = JSON.stringify(msg);
-          for (const ctrl of room.controllers) {
-            if (ctrl.readyState === WebSocket.OPEN) {
-              ctrl.send(payload);
+        if (msg.type === 'telemetry' && role === 'sim' && room.controllers.size > 0) {
+          for (const ctrl of room.controllers.values()) {
+            if (ctrl.readyState === WebSocket.OPEN && ctrl.bufferedAmount < 4096) {
+              ctrl.send(rawText);
             }
           }
         }
@@ -111,7 +176,7 @@ async function startServer() {
       if (role === 'sim' && room.sim === ws) {
         room.sim = null;
       } else if (role === 'controller') {
-        room.controllers.delete(ws);
+        room.controllers.delete(clientId);
       }
       broadcastStatus(joinedRoom, room);
       if (!room.sim && room.controllers.size === 0) {

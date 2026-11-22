@@ -6,6 +6,7 @@ import type { StickInput } from '../sim/types';
 interface PairingModalProps {
   roomCode: string;
   controllerCount: number;
+  p2pConnected?: boolean;
   serverAvailable?: boolean;
   remoteSticks: StickInput;
   onClose: () => void;
@@ -14,6 +15,7 @@ interface PairingModalProps {
 export function PairingModal({
   roomCode,
   controllerCount,
+  p2pConnected = false,
   serverAvailable = true,
   remoteSticks,
   onClose,
@@ -133,6 +135,15 @@ export function PairingModal({
                     {controllerCount > 0 ? `${controllerCount} conectado` : 'Aguardando...'}
                   </span>
                 </div>
+                {controllerCount > 0 && (
+                  <div className="text-[10px] font-mono mt-0.5 text-slate-400">
+                    {p2pConnected ? (
+                      <span className="text-emerald-400">Direto P2P (Ultra Rápido)</span>
+                    ) : (
+                      <span className="text-sky-400">Modo Binário WS</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
