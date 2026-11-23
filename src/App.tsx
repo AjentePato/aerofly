@@ -6,11 +6,13 @@ import { OutcomeModal, PauseModal } from './components/Modals';
 import { PairingModal } from './components/PairingModal';
 import { ChangelogModal } from './components/ChangelogModal';
 import { MobileController } from './components/MobileController';
+import { VirtualTouchSticks } from './components/VirtualTouchSticks';
 import { MISSIONS, createInitialMissionProgress, getMissionById } from './sim/missions';
 import { readBrowserGamepad, type GamepadStatus } from './sim/gamepad';
 import { decodeBinaryStick } from './sim/stickProtocol';
 import { RTC_CONFIG, RTC_STICK_CHANNEL_OPTIONS } from './sim/webrtcConfig';
 import { loadSavedDroneSkin, saveDroneSkin } from './sim/droneSkins';
+import { detectTouchSticksDefault } from './sim/touchControls';
 import type {
   CameraMode,
   DronePhysicsState,
@@ -78,6 +80,8 @@ export default function App() {
   const [showcaseDrone, setShowcaseDrone] = useState(false);
   const [windEnabled, setWindEnabled] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [touchSticksEnabled, setTouchSticksEnabled] = useState<boolean>(() => detectTouchSticksDefault());
+  const [hudHidden, setHudHidden] = useState(false);
   const [resetNonce, setResetNonce] = useState(0);
   const [showPairing, setShowPairing] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
@@ -89,6 +93,9 @@ export default function App() {
   const [remotePreview, setRemotePreview] = useState<StickInput>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
   const remoteStickRef = useRef<StickInput>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
   const remoteActiveRef = useRef(false);
+  const touchStickRef = useRef<StickInput>({ throttle: 0, yaw: 0, pitch: 0, roll: 0 });
+  const touchActiveRef = useRef(false);
+  const virtualArmHoldRef = useRef(false);
 
   const [telemetry, setTelemetry] = useState<DroneTelemetry>(DEFAULT_TELEMETRY);
   const [progress, setProgress] = useState<MissionProgress>(() => createInitialMissionProgress('hover_takeoff'));
@@ -106,10 +113,23 @@ export default function App() {
     }
   });
 
-  // Sync game state machine to document.body.dataset.state
+  // Sync game state machine & HUD visibility to document.body.dataset
   useEffect(() => {
     document.body.dataset.state = phase;
   }, [phase]);
+
+  useEffect(() => {
+    document.body.dataset.hudHidden = hudHidden ? 'true' : 'false';
+    const touchActive = phase === 'playing' && touchSticksEnabled && !hudHidden;
+    touchActiveRef.current = touchActive;
+    if (!touchActive) {
+      touchStickRef.current.throttle = 0;
+      touchStickRef.current.yaw = 0;
+      touchStickRef.current.pitch = 0;
+      touchStickRef.current.roll = 0;
+      virtualArmHoldRef.current = false;
+    }
+  }, [phase, touchSticksEnabled, hudHidden]);
 
   // Actions
   const cycleCamera = useCallback(() => {
@@ -139,6 +159,14 @@ export default function App() {
 
   const handleTogglePause = useCallback(() => {
     setPhase((p) => (p === 'playing' ? 'paused' : p === 'paused' ? 'playing' : p));
+  }, []);
+
+  const handleToggleHud = useCallback(() => {
+    setHudHidden((prev) => !prev);
+  }, []);
+
+  const handleVirtualArmHoldChange = useCallback((holding: boolean) => {
+    virtualArmHoldRef.current = holding;
   }, []);
 
   // Refs so incoming WS/WebRTC events never force effect teardown or trigger 50Hz React renders
@@ -522,11 +550,15 @@ export default function App() {
         muted={muted}
         remoteStickRef={remoteStickRef}
         remoteActiveRef={remoteActiveRef}
+        touchStickRef={touchStickRef}
+        touchActiveRef={touchActiveRef}
+        virtualArmHoldRef={virtualArmHoldRef}
         resetNonce={resetNonce}
         onHudUpdate={handleHudUpdate}
         onMissionComplete={handleMissionComplete}
         onCrash={handleCrash}
         onTogglePause={handleTogglePause}
+        onToggleHud={handleToggleHud}
         onCycleCamera={cycleCamera}
         onSelectFlightMode={setFlightMode}
         onToggleMute={() => setMuted((m) => !m)}
@@ -540,6 +572,7 @@ export default function App() {
           flightMode={flightMode}
           droneSkin={droneSkin}
           windEnabled={windEnabled}
+          touchSticksEnabled={touchSticksEnabled}
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
           gamepadLabel={gamepadStatus.label}
@@ -555,21 +588,29 @@ export default function App() {
         />
       )}
 
+      {phase === 'playing' && touchSticksEnabled && !hudHidden && (
+        <VirtualTouchSticks touchStickRef={touchStickRef} />
+      )}
+
       {phase === 'playing' && (
         <FlightHUD
           telemetry={telemetry}
           progress={progress}
           sticks={activeSticks}
           muted={muted}
+          hudHidden={hudHidden}
+          touchSticksEnabled={touchSticksEnabled}
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
           gamepadLabel={gamepadStatus.label}
           onCycleCamera={cycleCamera}
           onToggleMute={() => setMuted((m) => !m)}
           onTogglePause={handleTogglePause}
+          onToggleHud={handleToggleHud}
           onReset={handleReset}
           onOpenPairing={() => setShowPairing(true)}
           onSelectFlightMode={setFlightMode}
+          onVirtualArmHoldChange={handleVirtualArmHoldChange}
         />
       )}
 
@@ -580,6 +621,8 @@ export default function App() {
           cameraMode={cameraMode}
           droneSkin={droneSkin}
           windEnabled={windEnabled}
+          touchSticksEnabled={touchSticksEnabled}
+          hudHidden={hudHidden}
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
           gamepadLabel={gamepadStatus.label}
@@ -594,6 +637,8 @@ export default function App() {
           onSelectCameraMode={setCameraMode}
           onSelectDroneSkin={handleSelectDroneSkin}
           onToggleWind={() => setWindEnabled((w) => !w)}
+          onToggleTouchSticks={() => setTouchSticksEnabled((v) => !v)}
+          onToggleHud={handleToggleHud}
           onOpenPairing={() => setShowPairing(true)}
         />
       )}

@@ -44,6 +44,11 @@ import {
   resolvePostArmStickGate,
   stepArmingState,
 } from './arming';
+import {
+  clampFloatingStickRadius,
+  computeAdaptiveVerticalFov,
+  shouldEnableTouchSticksByDefault,
+} from './touchControls';
 import type { PhysicsConfig, StickInput } from './types';
 
 const neutralInput: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
@@ -738,6 +743,35 @@ test('armed drone resting on a surface ignores pitch, roll, yaw, and wind until 
   assert.ok(Math.abs(drone.yaw) > 0.1, 'Expected yaw to work once airborne');
 });
 
+test('touch controls default detection, stick radius clamping, and portrait FOV compensation', () => {
+  assert.equal(
+    shouldEnableTouchSticksByDefault({ hasTouch: true, coarsePointer: false, viewportWidth: 1440 }),
+    true
+  );
+  assert.equal(
+    shouldEnableTouchSticksByDefault({ hasTouch: false, coarsePointer: true, viewportWidth: 1440 }),
+    true
+  );
+  assert.equal(
+    shouldEnableTouchSticksByDefault({ hasTouch: false, coarsePointer: false, viewportWidth: 390 }),
+    true
+  );
+  assert.equal(
+    shouldEnableTouchSticksByDefault({ hasTouch: false, coarsePointer: false, viewportWidth: 844 }),
+    true
+  );
+  assert.equal(
+    shouldEnableTouchSticksByDefault({ hasTouch: false, coarsePointer: false, viewportWidth: 1440 }),
+    false
+  );
 
+  assert.equal(clampFloatingStickRadius(390), 54);
+  assert.equal(clampFloatingStickRadius(844), 68);
 
-
+  // Landscape/desktop keeps exact base FOV; portrait widens vertical FOV cleanly with upper cap
+  assert.equal(computeAdaptiveVerticalFov(62, 1.6), 62);
+  assert.equal(computeAdaptiveVerticalFov(62, 1.0), 62);
+  const portraitFov = computeAdaptiveVerticalFov(62, 390 / 844);
+  assert.ok(portraitFov > 75 && portraitFov <= 98, `Expected portrait FOV boost, got ${portraitFov}`);
+  assert.equal(GAME_VERSION, 'V2.0');
+});

@@ -20,6 +20,7 @@ import {
 } from '../sim/crashAnimation';
 import { createCrashEffects } from '../sim/crashEffects';
 import { resolvePostArmStickGate, stepArmingState } from '../sim/arming';
+import { computeAdaptiveVerticalFov } from '../sim/touchControls';
 import type {
   CameraMode,
   DronePhysicsState,
@@ -43,11 +44,15 @@ export interface SimBridgeProps {
   muted: boolean;
   remoteStickRef: React.MutableRefObject<StickInput>;
   remoteActiveRef: React.MutableRefObject<boolean>;
+  touchStickRef: React.MutableRefObject<StickInput>;
+  touchActiveRef: React.MutableRefObject<boolean>;
+  virtualArmHoldRef?: React.MutableRefObject<boolean>;
   resetNonce: number;
   onHudUpdate: (telemetry: DroneTelemetry, progress: MissionProgress, activeSticks: StickInput) => void;
   onMissionComplete: (progress: MissionProgress, state: DronePhysicsState) => void;
   onCrash: (progress: MissionProgress, state: DronePhysicsState) => void;
   onTogglePause: () => void;
+  onToggleHud: () => void;
   onCycleCamera: () => void;
   onSelectFlightMode: (mode: FlightMode) => void;
   onToggleMute: () => void;
@@ -179,6 +184,11 @@ export function DroneCanvas(props: SimBridgeProps) {
           propsRef.current.onTriggerReset();
           return;
         }
+        if (code === 'KeyH') {
+          e.preventDefault();
+          propsRef.current.onToggleHud();
+          return;
+        }
         if (code === 'Digit1') propsRef.current.onSelectFlightMode('normal');
         if (code === 'Digit2') propsRef.current.onSelectFlightMode('sport');
       } else if (propsRef.current.phase === 'paused' && (code === 'KeyP' || code === 'Escape')) {
@@ -231,11 +241,21 @@ export function DroneCanvas(props: SimBridgeProps) {
     const onResize = () => {
       const w = container.clientWidth || window.innerWidth;
       const h = container.clientHeight || window.innerHeight;
+      if (w <= 0 || h <= 0) return;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
     };
     window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
+    resizeObserver?.observe(container);
+
+    const onContextLost = (e: Event) => {
+      e.preventDefault();
+    };
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost);
 
     function sampleControllerSticks(gpSticks?: StickInput): StickInput {
       let throttle = 0;
@@ -245,10 +265,18 @@ export function DroneCanvas(props: SimBridgeProps) {
 
       const r = propsRef.current.remoteStickRef.current;
       if (propsRef.current.remoteActiveRef.current) {
-        if (Math.abs(r.throttle) > 0.02) throttle = r.throttle;
-        if (Math.abs(r.yaw) > 0.02) yaw = r.yaw;
-        if (Math.abs(r.pitch) > 0.02) pitch = r.pitch;
-        if (Math.abs(r.roll) > 0.02) roll = r.roll;
+        if (Math.abs(r.throttle) > 0.02) throttle += r.throttle;
+        if (Math.abs(r.yaw) > 0.02) yaw += r.yaw;
+        if (Math.abs(r.pitch) > 0.02) pitch += r.pitch;
+        if (Math.abs(r.roll) > 0.02) roll += r.roll;
+      }
+
+      const t = propsRef.current.touchStickRef.current;
+      if (propsRef.current.touchActiveRef.current) {
+        if (Math.abs(t.throttle) > 0.02) throttle += t.throttle;
+        if (Math.abs(t.yaw) > 0.02) yaw += t.yaw;
+        if (Math.abs(t.pitch) > 0.02) pitch += t.pitch;
+        if (Math.abs(t.roll) > 0.02) roll += t.roll;
       }
 
       if (gpSticks) {
@@ -289,10 +317,19 @@ export function DroneCanvas(props: SimBridgeProps) {
       // Merge remote mobile virtual controller sticks seamlessly
       const r = propsRef.current.remoteStickRef.current;
       if (propsRef.current.remoteActiveRef.current) {
-        if (Math.abs(r.throttle) > 0.02 || throttle === 0) throttle = r.throttle;
-        if (Math.abs(r.yaw) > 0.02) yaw = r.yaw;
-        if (Math.abs(r.pitch) > 0.02) pitch = r.pitch;
-        if (Math.abs(r.roll) > 0.02) roll = r.roll;
+        if (Math.abs(r.throttle) > 0.02) throttle += r.throttle;
+        if (Math.abs(r.yaw) > 0.02) yaw += r.yaw;
+        if (Math.abs(r.pitch) > 0.02) pitch += r.pitch;
+        if (Math.abs(r.roll) > 0.02) roll += r.roll;
+      }
+
+      // Merge on-screen virtual touch joysticks (mobile/touch gameplay)
+      const t = propsRef.current.touchStickRef.current;
+      if (propsRef.current.touchActiveRef.current) {
+        if (Math.abs(t.throttle) > 0.02) throttle += t.throttle;
+        if (Math.abs(t.yaw) > 0.02) yaw += t.yaw;
+        if (Math.abs(t.pitch) > 0.02) pitch += t.pitch;
+        if (Math.abs(t.roll) > 0.02) roll += t.roll;
       }
 
       // Merge physical Xbox / DS4 gamepad sticks strictly (Mode 2 analog sticks only)
@@ -467,16 +504,18 @@ export function DroneCanvas(props: SimBridgeProps) {
           _camRightDir.set(Math.cos(showcaseAngle), 0, -Math.sin(showcaseAngle));
           _camTargetPos.set(0, hoverY - 0.04, 0).addScaledVector(_camRightDir, -0.28);
           camera.lookAt(_camTargetPos);
-          if (Math.abs(camera.fov - 44) > 0.1) {
-            camera.fov += (44 - camera.fov) * (1 - Math.exp(-6.5 * dt));
+          const showcaseFov = computeAdaptiveVerticalFov(44, camera.aspect);
+          if (Math.abs(camera.fov - showcaseFov) > 0.1) {
+            camera.fov += (showcaseFov - camera.fov) * (1 - Math.exp(-6.5 * dt));
             camera.updateProjectionMatrix();
           }
         } else {
           _camDesiredPos.set(Math.sin(tourAngle) * 9.5, 5.2 + Math.sin(elapsed * 0.4) * 0.8, Math.cos(tourAngle) * 9.5);
           camera.position.lerp(_camDesiredPos, 1 - Math.exp(-4.5 * dt));
           camera.lookAt(0, 2.8, -10);
-          if (Math.abs(camera.fov - 58) > 0.1) {
-            camera.fov += (58 - camera.fov) * (1 - Math.exp(-4.5 * dt));
+          const titleFov = computeAdaptiveVerticalFov(58, camera.aspect);
+          if (Math.abs(camera.fov - titleFov) > 0.1) {
+            camera.fov += (titleFov - camera.fov) * (1 - Math.exp(-4.5 * dt));
             camera.updateProjectionMatrix();
           }
         }
@@ -490,7 +529,7 @@ export function DroneCanvas(props: SimBridgeProps) {
             armingProgress,
             droneState.armed,
             droneState.crashed,
-            keys.has('KeyV'),
+            keys.has('KeyV') || Boolean(cur.virtualArmHoldRef?.current),
             controllerSticks,
             armDt
           );
@@ -651,7 +690,7 @@ export function DroneCanvas(props: SimBridgeProps) {
 
           camera.position.copy(_fpvWorldPos);
           camera.quaternion.copy(_fpvWorldQuat).multiply(_fpvTiltQuat);
-          const targetFov = 86 + Math.min(12, speed * 0.45);
+          const targetFov = computeAdaptiveVerticalFov(86 + Math.min(12, speed * 0.45), camera.aspect);
           if (Math.abs(camera.fov - targetFov) > 0.1) {
             camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-8 * dt));
             camera.updateProjectionMatrix();
@@ -708,7 +747,7 @@ export function DroneCanvas(props: SimBridgeProps) {
           }
           camera.lookAt(_camTargetPos);
 
-          const targetFov = 62 + Math.min(10, speed * 0.4);
+          const targetFov = computeAdaptiveVerticalFov(62 + Math.min(10, speed * 0.4), camera.aspect);
           if (Math.abs(camera.fov - targetFov) > 0.1) {
             camera.fov += (targetFov - camera.fov) * (1 - Math.exp(-6 * dt));
             camera.updateProjectionMatrix();
@@ -781,6 +820,9 @@ export function DroneCanvas(props: SimBridgeProps) {
       window.removeEventListener('gamepadconnected', onGamepadChange);
       window.removeEventListener('gamepaddisconnected', onGamepadChange);
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+      resizeObserver?.disconnect();
+      renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
       audio.dispose();
       crashEffects.dispose();
       droneRig.dispose();

@@ -26,6 +26,35 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: 'V2.0',
+    title: 'Simulador Completo no Celular, Joysticks Dinâmicos e Modo Tela Limpa',
+    summary:
+      'Grande atualização que torna todo o simulador 3D jogável diretamente no celular ou tablet, com joysticks virtuais dinâmicos na tela e opção para ocultar todo o HUD.',
+    kind: 'major',
+    changes: [
+      {
+        category: 'Novo',
+        text: 'Suporte completo para jogar direto no celular (em pé ou deitado), com menus, botões e câmera adaptados automaticamente para telas menores.',
+      },
+      {
+        category: 'Novo',
+        text: 'Joysticks virtuais dinâmicos na própria tela de voo: toque em qualquer ponto do lado esquerdo (subir e girar) ou direito (mover para frente, trás e lados) para o controle surgir exatamente onde seu dedo tocou.',
+      },
+      {
+        category: 'Novo',
+        text: 'Partida dos motores também por toque: arraste os dois joysticks virtuais para baixo e para dentro ou segure o botão "Segurar p/ Ligar" no aviso inicial.',
+      },
+      {
+        category: 'Novo',
+        text: 'Botão "Ocultar HUD" na tela de voo (e atalho [H] no teclado) para esconder todos os painéis, mira, telemetria e também os joysticks na tela, deixando 100% da visão livre com um botão discreto para restaurar.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'Opções no menu de pausa para ligar ou desligar os joysticks na tela a qualquer momento e alternar a exibição do HUD.',
+      },
+    ],
+  },
+  {
     version: 'V1.6.1',
     title: 'Melhorias no Drone',
     summary:

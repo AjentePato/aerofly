@@ -1,5 +1,19 @@
 import { useState } from 'react';
-import { Play, RotateCcw, Smartphone, Wind, Award, AlertTriangle, Home, Gamepad2, Palette, SlidersHorizontal } from 'lucide-react';
+import {
+  Play,
+  RotateCcw,
+  Smartphone,
+  Wind,
+  Award,
+  AlertTriangle,
+  Home,
+  Gamepad2,
+  Palette,
+  SlidersHorizontal,
+  Eye,
+  EyeOff,
+  Touchpad,
+} from 'lucide-react';
 import { MISSIONS, getMissionById } from '../sim/missions';
 import { DroneSkinSelector } from './DroneSkinSelector';
 import type { CameraMode, DronePhysicsState, DroneSkinId, FlightMode, MissionId, MissionProgress } from '../sim/types';
@@ -10,6 +24,8 @@ interface PauseModalProps {
   cameraMode: CameraMode;
   droneSkin: DroneSkinId;
   windEnabled: boolean;
+  touchSticksEnabled: boolean;
+  hudHidden: boolean;
   controllerConnected: boolean;
   gamepadConnected?: boolean;
   gamepadLabel?: string;
@@ -21,6 +37,8 @@ interface PauseModalProps {
   onSelectCameraMode: (cam: CameraMode) => void;
   onSelectDroneSkin: (skin: DroneSkinId) => void;
   onToggleWind: () => void;
+  onToggleTouchSticks: () => void;
+  onToggleHud: () => void;
   onOpenPairing: () => void;
 }
 
@@ -30,6 +48,8 @@ export function PauseModal({
   cameraMode,
   droneSkin,
   windEnabled,
+  touchSticksEnabled,
+  hudHidden,
   controllerConnected,
   gamepadConnected = false,
   gamepadLabel,
@@ -41,6 +61,8 @@ export function PauseModal({
   onSelectCameraMode,
   onSelectDroneSkin,
   onToggleWind,
+  onToggleTouchSticks,
+  onToggleHud,
   onOpenPairing,
 }: PauseModalProps) {
   const [pauseTab, setPauseTab] = useState<'settings' | 'texture'>('settings');
@@ -195,22 +217,58 @@ export function PauseModal({
               </div>
             </div>
 
-            {/* Wind Toggle */}
-            <button
-              type="button"
-              onClick={onToggleWind}
-              className={`w-full px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
-                windEnabled
-                  ? 'bg-sky-500/15 border-sky-400 text-sky-200'
-                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <Wind className="w-4 h-4" />
-                Simulação de Vento Lateral
-              </span>
-              <span className="font-mono">{windEnabled ? 'ATIVADO' : 'DESLIGADO'}</span>
-            </button>
+            {/* Wind, On-Screen Joysticks & HUD Visibility Toggles */}
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={onToggleWind}
+                className={`w-full px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
+                  windEnabled
+                    ? 'bg-sky-500/15 border-sky-400 text-sky-200'
+                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Wind className="w-4 h-4" aria-hidden="true" />
+                  Simulação de Vento Lateral
+                </span>
+                <span className="font-mono">{windEnabled ? 'ATIVADO' : 'DESLIGADO'}</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="pause-toggle-touch-sticks"
+                onClick={onToggleTouchSticks}
+                className={`w-full px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
+                  touchSticksEnabled
+                    ? 'bg-amber-500/15 border-amber-400 text-amber-200'
+                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Touchpad className="w-4 h-4" aria-hidden="true" />
+                  Joysticks Virtuais na Tela
+                </span>
+                <span className="font-mono">{touchSticksEnabled ? 'ATIVADO' : 'DESLIGADO'}</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="pause-toggle-hud"
+                onClick={onToggleHud}
+                className={`w-full px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
+                  hudHidden
+                    ? 'bg-slate-800 border-amber-400/60 text-amber-200'
+                    : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  {hudHidden ? <EyeOff className="w-4 h-4" aria-hidden="true" /> : <Eye className="w-4 h-4" aria-hidden="true" />}
+                  Exibição do HUD e Joysticks
+                </span>
+                <span className="font-mono">{hudHidden ? 'OCULTO' : 'VISÍVEL'}</span>
+              </button>
+            </div>
           </>
         ) : (
           <div className="flex flex-col gap-2">

@@ -13,19 +13,21 @@ Simulador 3D de voo e treinamento para drones quadricópteros construído com Re
 - `src/sim/crashAnimation.ts`: Física pura da animação pós-colisão (rebote, queda com giro descontrolado/tumble, quique no solo e temporização antes da tela de resultado).
 - `src/sim/crashEffects.ts`: Pool pré-alocado de partículas 3D de colisão (onda de choque, faíscas, fragmentos, hélices soltas e fumaça).
 - `src/sim/changelog.ts`: Histórico oficial de versões (`V1.X` para recursos, `V1.X.Y` para correções) e filtragem das alterações desde a V1.0.
+- `src/sim/floatingStick.ts` & `src/sim/touchControls.ts`: Lógica pura dos joysticks dinâmicos flutuantes no ponto de toque, detecção automática de dispositivos móveis/toque, raio adaptativo para modo paisagem e compensação de FOV vertical em modo retrato.
 - `src/sim/stickProtocol.ts`: Codificação/decodificação binária compacta de 9 bytes (`0x01 + 4x Int16LE`), detecção de variação/retorno imediato ao centro e seleção de transporte (`webrtc` / `ws`).
 - `src/sim/webrtcConfig.ts`: Configuração ICE/STUN e tipos de sinalização para canal direto P2P (`RTCDataChannel` não ordenado e sem retransmissão).
 - `src/sim/worldBuilder.ts`: Construção da cena Three.js (terreno otimizado, lago, pistas, estruturas com raio de culling para raycast, vegetação, iluminação e visuais de missão).
 - `src/sim/droneSkins.ts`: Catálogo e persistência local (`default`, `dji_lito_1` e `fpv_freestyle`) dos visuais/texturas selecionáveis do drone.
 - `src/sim/droneMesh.ts`, `src/sim/droneLito1Mesh.ts` & `src/sim/droneFpvMesh.ts`: Rigs 3D completos do Drone Padrão, do Drone Branco Moderno e do Drone FPV Freestyle (chassi aberto em carbono, motores vermelhos, hélices azuis de 3 pás, câmera dupla e bateria no topo).
-- `src/sim/arming.ts`: Máquina de partida dos motores (`armed: false` ao iniciar ou reiniciar fase) exigindo segurar `V` no teclado ou o gesto CSC dos dois sticks do controle para baixo e para dentro (com margem generosa de precisão e trava que aguarda soltar os sticks após ligar).
+- `src/sim/arming.ts`: Máquina de partida dos motores (`armed: false` ao iniciar ou reiniciar fase) exigindo segurar `V` no teclado, usar o botão de toque "Segurar p/ Ligar" ou o gesto CSC dos dois sticks para baixo e para dentro.
 - `src/sim/audio.ts`: Síntese procedural de motores, melodia de partida dos ESCs, portões e colisões via Web Audio API.
-- `src/components/DroneCanvas.tsx`: Loop WebGL/Three.js (`requestAnimationFrame` / `afterDraw` em software GL), amostragem unificada de teclado + celular + gamepad físico, partida dos motores, troca ao vivo de modelo do drone e câmeras (`chase`, `fpv`).
-- `src/components/TitleOverlay.tsx` & `src/components/DroneSkinSelector.tsx`: Tela inicial com abas (`Missões & Voo` e `Textura do Drone`), prévia 3D em close-up, versão ao lado do título e botão "Novidades!" no canto inferior direito.
+- `src/components/FloatingStickZone.tsx` & `src/components/VirtualTouchSticks.tsx`: Componente compartilhado de joystick virtual dinâmico (usado tanto no modo controle remoto quanto direto na tela do jogo em celular/tablet), aparecendo exatamente no primeiro ponto de toque em cada metade da tela.
+- `src/components/DroneCanvas.tsx`: Loop WebGL/Three.js (`requestAnimationFrame` / `afterDraw` em software GL), amostragem unificada de teclado + sticks virtuais na tela + celular pareado + gamepad físico, atalho `[H]` para ocultar HUD, partida dos motores, troca ao vivo de modelo do drone e câmeras (`chase`, `fpv`) com compensação retrato.
+- `src/components/TitleOverlay.tsx` & `src/components/DroneSkinSelector.tsx`: Tela inicial responsiva (retrato e paisagem) com abas (`Missões & Voo` e `Textura do Drone`), prévia 3D em close-up, versão ao lado do título e botão "Novidades!" no canto inferior direito.
 - `src/components/ChangelogModal.tsx`: Modal acessível exibindo a linha do tempo detalhada de versões com filtros.
-- `src/components/FlightHUD.tsx`: HUD de voo com aviso de partida enquanto desligado, objetivo da missão, troca rápida de modo, câmera/som/pausa, status de controle Xbox/DS4, visualizador ao vivo dos sticks Modo 2 e barra de telemetria.
-- `src/components/Modals.tsx`: Modais de pausa (`PauseModal`) e resultado de missão (`OutcomeModal`).
-- `src/components/PairingModal.tsx` & `src/components/MobileController.tsx`: Controle remoto virtual por celular com toque direto no DOM, envio imediato binário de 9 bytes e upgrade automático para WebRTC P2P.
+- `src/components/FlightHUD.tsx`: HUD responsivo com opção de ocultar todo o HUD e joysticks (`[H]` / botão olho), aviso de partida enquanto desligado, objetivo da missão, troca rápida de modo, câmera/som/pausa, status de controle Xbox/DS4 e barra de telemetria centralizada em telas touch.
+- `src/components/Modals.tsx`: Modais de pausa (`PauseModal`, incluindo alternância de joysticks virtuais na tela e exibição do HUD) e resultado de missão (`OutcomeModal`).
+- `src/components/PairingModal.tsx` & `src/components/MobileController.tsx`: Controle remoto virtual por celular usando `FloatingStickZone`, envio imediato binário de 9 bytes e upgrade automático para WebRTC P2P.
 - `server.ts`: Servidor Express + WebSocket (`perMessageDeflate: false`, `TCP_NODELAY`) com repasse binário zero-parse, controle de fila e sinalização WebRTC.
 
 ## Mapeamento RC Modo 2 (Controle Xbox / DS4Windows)

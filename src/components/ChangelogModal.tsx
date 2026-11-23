@@ -19,7 +19,7 @@ interface ChangelogModalProps {
 
 const FILTER_OPTIONS: Array<{ id: ChangelogFilter; label: string }> = [
   { id: 'all', label: 'Todas' },
-  { id: 'features', label: 'Recursos (V1.X)' },
+  { id: 'features', label: 'Recursos (V1.X / V2.X)' },
   { id: 'fixes', label: 'Correções (V1.X.Y)' },
 ];
 
@@ -77,7 +77,7 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-1">
-              Histórico completo do simulador: versões principais (V1.X) e correções rápidas (V1.X.Y).
+              Histórico completo do simulador: versões principais (V1.X / V2.X) e correções rápidas (V1.X.Y).
             </p>
           </div>
           <button

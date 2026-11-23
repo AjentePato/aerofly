@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, RotateCcw, Wifi, WifiOff, ArrowLeft, Zap } from 'lucide-react';
-import {
-  computeFloatingStickOrigin,
-  computeFloatingStickValue,
-  type FloatingOrigin,
-  type StickVec,
-} from '../sim/floatingStick';
+import { FloatingStickZone } from './FloatingStickZone';
+import type { StickVec } from '../sim/floatingStick';
 import {
   STICK_PACKET_BYTES,
   encodeBinaryStickInto,
@@ -20,196 +16,7 @@ interface MobileControllerProps {
   onExitToSimulator?: () => void;
 }
 
-const STICK_RADIUS_PX = 68;
 const MIN_SEND_INTERVAL_MS = 12; // ~83Hz max rate; 0 packets when idle
-
-function FloatingTouchZone({
-  label,
-  subLabel,
-  side,
-  onStickSample,
-}: {
-  label: string;
-  subLabel: string;
-  side: 'left' | 'right';
-  onStickSample: (pos: StickVec, immediate: boolean) => void;
-}) {
-  const zoneRef = useRef<HTMLDivElement | null>(null);
-  const knobRef = useRef<HTMLDivElement | null>(null);
-  const readoutRef = useRef<HTMLDivElement | null>(null);
-  const rectRef = useRef<DOMRect | null>(null);
-  const pointerIdRef = useRef<number | null>(null);
-  const originRef = useRef<FloatingOrigin | null>(null);
-  const valueRef = useRef<StickVec>({ x: 0, y: 0 });
-  const lastReadoutMsRef = useRef(0);
-  const readoutTimerRef = useRef(0);
-  const [activeOrigin, setActiveOrigin] = useState<FloatingOrigin | null>(null);
-
-  const syncVisuals = (pos: StickVec, forceReadout: boolean) => {
-    if (knobRef.current) {
-      const dx = pos.x * STICK_RADIUS_PX;
-      const dy = -pos.y * STICK_RADIUS_PX;
-      knobRef.current.style.transform = `translate3d(calc(-50% + ${dx}px), calc(-50% + ${dy}px), 0)`;
-    }
-    const now = performance.now();
-    const writeReadout = (v: StickVec) => {
-      if (readoutRef.current) {
-        readoutRef.current.textContent = `${subLabel} · ${Math.round(v.x * 100)}% / ${Math.round(v.y * 100)}%`;
-      }
-    };
-    if (forceReadout || now - lastReadoutMsRef.current >= 65) {
-      if (readoutTimerRef.current) {
-        clearTimeout(readoutTimerRef.current);
-        readoutTimerRef.current = 0;
-      }
-      lastReadoutMsRef.current = now;
-      writeReadout(pos);
-    } else if (!readoutTimerRef.current) {
-      const wait = Math.max(8, 65 - (now - lastReadoutMsRef.current));
-      readoutTimerRef.current = window.setTimeout(() => {
-        readoutTimerRef.current = 0;
-        lastReadoutMsRef.current = performance.now();
-        writeReadout(valueRef.current);
-      }, wait);
-    }
-  };
-
-  // Sync newly mounted knob position right after activeOrigin flips on pointerdown
-  useEffect(() => {
-    if (activeOrigin) {
-      syncVisuals(valueRef.current, true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeOrigin]);
-
-  const toLocalCoords = (clientX: number, clientY: number) => {
-    const rect = rectRef.current ?? zoneRef.current?.getBoundingClientRect();
-    if (!rect) return { x: 0, y: 0 };
-    return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
-    };
-  };
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    if (pointerIdRef.current !== null) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    pointerIdRef.current = e.pointerId;
-    rectRef.current = e.currentTarget.getBoundingClientRect();
-
-    const local = toLocalCoords(e.clientX, e.clientY);
-    const origin = computeFloatingStickOrigin(local.x, local.y);
-    originRef.current = origin;
-    setActiveOrigin(origin);
-
-    const nextVal = computeFloatingStickValue(local.x, local.y, origin, STICK_RADIUS_PX);
-    valueRef.current = nextVal;
-    syncVisuals(nextVal, true);
-    onStickSample(nextVal, true);
-
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      try {
-        navigator.vibrate(6);
-      } catch {
-        // Ignore unsupported vibrate
-      }
-    }
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (pointerIdRef.current !== e.pointerId || !originRef.current) return;
-    const local = toLocalCoords(e.clientX, e.clientY);
-    const nextVal = computeFloatingStickValue(
-      local.x,
-      local.y,
-      originRef.current,
-      STICK_RADIUS_PX
-    );
-    valueRef.current = nextVal;
-    syncVisuals(nextVal, false);
-    onStickSample(nextVal, false);
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (pointerIdRef.current !== e.pointerId) return;
-    pointerIdRef.current = null;
-    originRef.current = null;
-    rectRef.current = null;
-    setActiveOrigin(null);
-
-    const releaseVal: StickVec = { x: 0, y: 0 };
-    valueRef.current = releaseVal;
-    syncVisuals(releaseVal, true);
-    onStickSample(releaseVal, true);
-  };
-
-  return (
-    <div
-      ref={zoneRef}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      role="application"
-      aria-label={label}
-      data-testid={side === 'left' ? 'left-stick-zone' : 'right-stick-zone'}
-      style={{ touchAction: 'none' }}
-      className={`relative w-full h-full flex flex-col items-center justify-end pb-4 select-none cursor-crosshair overflow-hidden ${
-        side === 'left' ? 'border-r border-slate-800/80' : ''
-      }`}
-    >
-      {/* Quiet center hint when stick is inactive */}
-      {!activeOrigin && (
-        <div className="pointer-events-none my-auto flex flex-col items-center gap-1.5 px-3 text-center">
-          <div className="w-10 h-10 rounded-full border border-dashed border-slate-700/90 flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-slate-600" />
-          </div>
-          <span className="text-xs font-medium text-slate-400">
-            Toque em qualquer ponto
-          </span>
-        </div>
-      )}
-
-      {/* Floating Dynamic Virtual Stick — appears centered exactly where user touched */}
-      {activeOrigin && (
-        <div
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-amber-400/60 bg-slate-900/75"
-          style={{
-            left: `${activeOrigin.x}px`,
-            top: `${activeOrigin.y}px`,
-            width: `${STICK_RADIUS_PX * 2}px`,
-            height: `${STICK_RADIUS_PX * 2}px`,
-          }}
-        >
-          {/* Center crosshairs */}
-          <div className="absolute inset-x-3 top-1/2 h-px bg-slate-600/60" />
-          <div className="absolute inset-y-3 left-1/2 w-px bg-slate-600/60" />
-          <div className="absolute inset-5 rounded-full border border-slate-700/60" />
-
-          {/* Moving thumb knob — updated via direct transform3d without React re-renders */}
-          <div
-            ref={knobRef}
-            className="absolute left-1/2 top-1/2 w-12 h-12 rounded-full bg-amber-500 border-4 border-slate-950 shadow-lg flex items-center justify-center will-change-transform"
-            style={{
-              transform: 'translate3d(-50%, -50%, 0)',
-            }}
-          >
-            <div className="w-3.5 h-3.5 rounded-full bg-amber-200/80" />
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Axis Label & Live Value */}
-      <div className="pointer-events-none text-center px-2">
-        <div className="text-xs font-display font-bold text-slate-200">{label}</div>
-        <div ref={readoutRef} className="text-[11px] font-mono text-slate-400 tabular-nums">
-          {subLabel} · 0% / 0%
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function MobileController({ initialRoom, onExitToSimulator }: MobileControllerProps) {
   const [roomInput, setRoomInput] = useState(initialRoom.toUpperCase());
@@ -595,15 +402,17 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
 
       {/* Split 50/50 Left & Right Floating Touch Arena */}
       <div className="flex-1 min-h-0 grid grid-cols-2 mt-2 rounded-xl border border-slate-800/80 bg-slate-900/35 overflow-hidden">
-        <FloatingTouchZone
+        <FloatingStickZone
           side="left"
+          variant="controller"
           label="Stick Esquerdo"
           subLabel="Acelerador / Yaw"
           onStickSample={handleLeftStickSample}
         />
 
-        <FloatingTouchZone
+        <FloatingStickZone
           side="right"
+          variant="controller"
           label="Stick Direito"
           subLabel="Pitch / Roll"
           onStickSample={handleRightStickSample}
