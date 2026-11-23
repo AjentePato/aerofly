@@ -6,6 +6,7 @@ import type { StickInput } from '../sim/types';
 
 interface VirtualTouchSticksProps {
   touchStickRef: React.MutableRefObject<StickInput>;
+  invisible?: boolean;
   onTouchStartAudio?: () => void;
 }
 
@@ -15,6 +16,7 @@ interface VirtualTouchSticksProps {
  */
 export function VirtualTouchSticks({
   touchStickRef,
+  invisible = false,
   onTouchStartAudio,
 }: VirtualTouchSticksProps) {
   const [radiusPx, setRadiusPx] = useState(() =>
@@ -60,12 +62,14 @@ export function VirtualTouchSticks({
   return (
     <div
       data-testid="virtual-touch-sticks"
+      data-touch-invisible={invisible ? 'true' : 'false'}
       className="fixed inset-0 z-10 grid grid-cols-2 select-none"
       style={{ touchAction: 'none' }}
     >
       <FloatingStickZone
         side="left"
         variant="overlay"
+        invisible={invisible}
         radiusPx={radiusPx}
         label="Stick Esquerdo na Tela (Subir / Girar)"
         subLabel="Subir · Girar"
@@ -75,6 +79,7 @@ export function VirtualTouchSticks({
       <FloatingStickZone
         side="right"
         variant="overlay"
+        invisible={invisible}
         radiusPx={radiusPx}
         label="Stick Direito na Tela (Mover)"
         subLabel="Mover · Lados"

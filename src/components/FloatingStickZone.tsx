@@ -12,6 +12,7 @@ export interface FloatingStickZoneProps {
   side: 'left' | 'right';
   radiusPx?: number;
   variant?: 'controller' | 'overlay';
+  invisible?: boolean;
   onStickSample: (pos: StickVec, immediate: boolean) => void;
 }
 
@@ -27,6 +28,7 @@ export function FloatingStickZone({
   side,
   radiusPx = 68,
   variant = 'controller',
+  invisible = false,
   onStickSample,
 }: FloatingStickZoneProps) {
   const zoneRef = useRef<HTMLDivElement | null>(null);
@@ -179,6 +181,7 @@ export function FloatingStickZone({
       aria-label={label}
       data-testid={side === 'left' ? 'left-stick-zone' : 'right-stick-zone'}
       data-stick-active={activeOrigin ? 'true' : 'false'}
+      data-stick-invisible={invisible ? 'true' : 'false'}
       style={{ touchAction: 'none' }}
       className={`relative w-full h-full flex flex-col justify-end select-none overflow-hidden ${
         isOverlay
@@ -202,7 +205,9 @@ export function FloatingStickZone({
         <div
           className={`pointer-events-none absolute bottom-20 sm:bottom-8 ${
             side === 'left' ? 'left-3 sm:left-7' : 'right-3 sm:right-7'
-          } flex flex-col items-center gap-1 opacity-80`}
+          } flex flex-col items-center gap-1 transition-opacity duration-150 ${
+            invisible ? 'opacity-0' : 'opacity-80'
+          }`}
         >
           <div
             className="w-14 h-14 sm:w-20 sm:h-20 rounded-full border border-dashed border-slate-200/45 flex items-center justify-center"
@@ -225,7 +230,9 @@ export function FloatingStickZone({
       {activeOrigin && (
         <div
           data-testid={side === 'left' ? 'left-stick-floating' : 'right-stick-floating'}
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-amber-400/70 shadow-xl"
+          className={`pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-amber-400/70 shadow-xl transition-opacity duration-150 ${
+            invisible ? 'opacity-0' : 'opacity-100'
+          }`}
           style={{
             left: `${activeOrigin.x}px`,
             top: `${activeOrigin.y}px`,

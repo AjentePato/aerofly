@@ -123,7 +123,7 @@ export function FlightHUD({
   const armPct = Math.round(telemetry.armingProgress * 100);
   const isChargingArm = telemetry.armingProgress > 0.01;
 
-  // Clean-screen mode: hide all HUD panels, reticle, telemetry & joysticks, keeping only a subtle restore button
+  // Clean-screen mode: hide HUD panels, reticle & telemetry while touch controls remain active and invisible
   if (hudHidden) {
     return (
       <div className="fixed inset-0 z-20 pointer-events-none select-none p-3 sm:p-4 md:p-6 flex items-start justify-end">
@@ -135,7 +135,7 @@ export function FlightHUD({
             e.currentTarget.blur();
             onToggleHud();
           }}
-          aria-label="Mostrar HUD e joysticks (H)"
+          aria-label="Mostrar HUD (H)"
           title="Mostrar HUD [H]"
           className="pointer-events-auto min-w-[40px] min-h-[40px] px-3 rounded-lg border border-slate-700/60 text-slate-200/80 hover:text-white hover:border-amber-400 opacity-55 hover:opacity-100 flex items-center gap-1.5 text-xs font-medium transition-opacity cursor-pointer"
           style={{ backgroundColor: 'rgba(8, 13, 24, 0.65)' }}
@@ -288,8 +288,8 @@ export function FlightHUD({
               e.currentTarget.blur();
               onToggleHud();
             }}
-            aria-label="Ocultar HUD e joysticks (H)"
-            title="Ocultar HUD [H]"
+            aria-label="Ocultar HUD (H)"
+            title="Ocultar HUD [H] (controles continuam ativos)"
             className="w-10 h-10 rounded-lg border border-slate-700/80 text-slate-100 flex items-center justify-center hover:border-amber-400 transition-colors cursor-pointer"
             style={{ backgroundColor: 'rgba(8, 13, 24, 0.82)' }}
           >
@@ -406,11 +406,28 @@ export function FlightHUD({
                 onPointerDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
+                  try {
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                  } catch {
+                    // Ignore synthetic capture errors
+                  }
                   onVirtualArmHoldChange(true);
                 }}
-                onPointerUp={() => onVirtualArmHoldChange(false)}
+                onPointerUp={(e) => {
+                  try {
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                  } catch {
+                    // Ignore release errors
+                  }
+                  onVirtualArmHoldChange(false);
+                }}
                 onPointerCancel={() => onVirtualArmHoldChange(false)}
-                onPointerLeave={() => onVirtualArmHoldChange(false)}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  onVirtualArmHoldChange(true);
+                }}
+                onTouchEnd={() => onVirtualArmHoldChange(false)}
+                onTouchCancel={() => onVirtualArmHoldChange(false)}
                 style={{ touchAction: 'none' }}
                 className="pointer-events-auto px-2.5 py-1.5 rounded-md bg-amber-500 active:bg-amber-400 text-slate-950 font-display font-bold text-[11px] whitespace-nowrap cursor-pointer select-none"
               >

@@ -46,7 +46,7 @@ export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
       },
       {
         category: 'Novo',
-        text: 'Botão "Ocultar HUD" na tela de voo (e atalho [H] no teclado) para esconder todos os painéis, mira, telemetria e também os joysticks na tela, deixando 100% da visão livre com um botão discreto para restaurar.',
+        text: 'Botão "Ocultar HUD" na tela de voo (e atalho [H] no teclado) para esconder todos os painéis, mira e telemetria: os joysticks por toque continuam funcionando na tela de forma invisível, deixando a visão do cenário 100% limpa com um botão discreto no canto para restaurar quando quiser.',
       },
       {
         category: 'Melhoria',

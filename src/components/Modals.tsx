@@ -264,7 +264,7 @@ export function PauseModal({
               >
                 <span className="flex items-center gap-2">
                   {hudHidden ? <EyeOff className="w-4 h-4" aria-hidden="true" /> : <Eye className="w-4 h-4" aria-hidden="true" />}
-                  Exibição do HUD e Joysticks
+                  Exibição do HUD (Sticks Ativos)
                 </span>
                 <span className="font-mono">{hudHidden ? 'OCULTO' : 'VISÍVEL'}</span>
               </button>

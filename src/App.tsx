@@ -120,7 +120,7 @@ export default function App() {
 
   useEffect(() => {
     document.body.dataset.hudHidden = hudHidden ? 'true' : 'false';
-    const touchActive = phase === 'playing' && touchSticksEnabled && !hudHidden;
+    const touchActive = phase === 'playing' && touchSticksEnabled;
     touchActiveRef.current = touchActive;
     if (!touchActive) {
       touchStickRef.current.throttle = 0;
@@ -588,8 +588,8 @@ export default function App() {
         />
       )}
 
-      {phase === 'playing' && touchSticksEnabled && !hudHidden && (
-        <VirtualTouchSticks touchStickRef={touchStickRef} />
+      {phase === 'playing' && touchSticksEnabled && (
+        <VirtualTouchSticks touchStickRef={touchStickRef} invisible={hudHidden} />
       )}
 
       {phase === 'playing' && (

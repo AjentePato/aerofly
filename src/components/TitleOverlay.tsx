@@ -362,7 +362,7 @@ export function TitleOverlay({
               <span aria-hidden="true">·</span>
               <span>2 sticks p/ baixo e dentro: Ligar</span>
               <span aria-hidden="true">·</span>
-              <span>Olho: Ocultar HUD e sticks</span>
+              <span>Olho: Ocultar HUD (controles ativos)</span>
             </>
           ) : (
             <>
