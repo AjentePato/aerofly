@@ -130,6 +130,14 @@ export class DroneAudioEngine {
     });
   }
 
+  public playArmChime(): void {
+    if (!this.initialized || !this.ctx || !this.masterGain || this.muted) return;
+    const notes = [440, 587.33, 880];
+    notes.forEach((freq, idx) => {
+      this.playToneAt(freq, this.ctx!.currentTime + idx * 0.075, 0.14, 'sine', 0.16);
+    });
+  }
+
   public playCrashThud(): void {
     this.playTone(145, 36, 0.34, 'sawtooth', 0.28);
     if (!this.initialized || !this.ctx || !this.masterGain || this.muted) return;

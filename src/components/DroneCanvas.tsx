@@ -19,6 +19,7 @@ import {
   type CrashTumbleState,
 } from '../sim/crashAnimation';
 import { createCrashEffects } from '../sim/crashEffects';
+import { resolvePostArmStickGate, stepArmingState } from '../sim/arming';
 import type {
   CameraMode,
   DronePhysicsState,
@@ -91,6 +92,7 @@ export function DroneCanvas(props: SimBridgeProps) {
     const renderer = new THREE.WebGLRenderer({
       antialias: !isSoftwareGl,
       powerPreference: 'high-performance',
+      preserveDrawingBuffer: isSoftwareGl,
     });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -126,6 +128,8 @@ export function DroneCanvas(props: SimBridgeProps) {
 
     // Simulation state held inside effect (never triggers React re-renders per frame)
     let droneState = createInitialDroneState();
+    let armingProgress = 0;
+    let awaitingStickRelease = false;
     let missionProgress = createInitialMissionProgress(propsRef.current.missionId);
     let crashTumble: CrashTumbleState = createIdleCrashTumble();
     let crashMissionSnapshot: MissionProgress | null = null;
@@ -183,6 +187,8 @@ export function DroneCanvas(props: SimBridgeProps) {
         return;
       }
 
+      if (propsRef.current.phase !== 'playing') return;
+      audio.init();
       keys.add(code);
     };
 
@@ -230,6 +236,35 @@ export function DroneCanvas(props: SimBridgeProps) {
       renderer.setSize(w, h);
     };
     window.addEventListener('resize', onResize);
+
+    function sampleControllerSticks(gpSticks?: StickInput): StickInput {
+      let throttle = 0;
+      let yaw = 0;
+      let pitch = 0;
+      let roll = 0;
+
+      const r = propsRef.current.remoteStickRef.current;
+      if (propsRef.current.remoteActiveRef.current) {
+        if (Math.abs(r.throttle) > 0.02) throttle = r.throttle;
+        if (Math.abs(r.yaw) > 0.02) yaw = r.yaw;
+        if (Math.abs(r.pitch) > 0.02) pitch = r.pitch;
+        if (Math.abs(r.roll) > 0.02) roll = r.roll;
+      }
+
+      if (gpSticks) {
+        throttle += gpSticks.throttle;
+        yaw += gpSticks.yaw;
+        pitch += gpSticks.pitch;
+        roll += gpSticks.roll;
+      }
+
+      return {
+        throttle: Math.max(-1, Math.min(1, throttle)),
+        yaw: Math.max(-1, Math.min(1, yaw)),
+        pitch: Math.max(-1, Math.min(1, pitch)),
+        roll: Math.max(-1, Math.min(1, roll)),
+      };
+    }
 
     function sampleCombinedSticks(gpSticks?: StickInput): StickInput {
       let throttle = 0;
@@ -298,6 +333,8 @@ export function DroneCanvas(props: SimBridgeProps) {
 
     function resetSimulation(missionId: MissionId) {
       droneState = createInitialDroneState();
+      armingProgress = 0;
+      awaitingStickRelease = false;
       missionProgress = createInitialMissionProgress(missionId);
       crashTumble = createIdleCrashTumble();
       crashMissionSnapshot = null;
@@ -307,14 +344,14 @@ export function DroneCanvas(props: SimBridgeProps) {
       droneRig.propellers.forEach((p) => {
         p.visible = true;
       });
-      droneRig.frontLedMat.emissive.setHex(0x38bdf8);
-      droneRig.frontLedMat.emissiveIntensity = 2.2;
-      droneRig.rearLedMat.emissive.setHex(0xef4444);
-      droneRig.rearLedMat.emissiveIntensity = 2.2;
+      droneRig.frontLedMat.emissive.setHex(0xf59e0b);
+      droneRig.frontLedMat.emissiveIntensity = 1.2;
+      droneRig.rearLedMat.emissive.setHex(0xf59e0b);
+      droneRig.rearLedMat.emissiveIntensity = 1.2;
+      lastHudEmitTime = 0;
       camShakeTrauma = 0;
       visualChaseYaw = droneState.yaw;
       visualYawBank = 0;
-      clearKeys();
     }
 
     function tick(now = performance.now()) {
@@ -326,6 +363,11 @@ export function DroneCanvas(props: SimBridgeProps) {
 
       const cur = propsRef.current;
       audio.setMuted(cur.muted);
+
+      // Clear held keys when leaving active flight
+      if (cur.phase !== 'playing' && lastPhase === 'playing') {
+        clearKeys();
+      }
 
       // Handle mission change or explicit reset
       if (cur.missionId !== lastMissionId || cur.resetNonce !== lastResetNonce) {
@@ -346,8 +388,10 @@ export function DroneCanvas(props: SimBridgeProps) {
       for (const rotor of world.turbineRotors) {
         rotor.rotation.z = turbineAngle;
       }
-      world.windsockCone.rotation.y = Math.sin(elapsed * 2.2) * (cur.windEnabled ? 0.32 : 0.12);
-      world.windsockCone.rotation.z = cur.windEnabled ? -0.1 : -0.38;
+      world.windsockSwivel.rotation.y = Math.sin(elapsed * 1.9) * (cur.windEnabled ? 0.34 : 0.14);
+      world.windsockCone.rotation.z =
+        (cur.windEnabled ? -0.1 : -0.52) +
+        Math.sin(elapsed * 4.4) * (cur.windEnabled ? 0.045 : 0.022);
       world.towerBeaconMat.emissiveIntensity = 1.5 + Math.max(0, Math.sin(elapsed * 3.2)) * 2.5;
 
       const missionDef = getMissionById(cur.missionId);
@@ -376,6 +420,9 @@ export function DroneCanvas(props: SimBridgeProps) {
         if (crashTumble.active) {
           droneRig.frontLedMat.emissive.setHex(0xef4444);
           droneRig.rearLedMat.emissive.setHex(0xef4444);
+        } else if (!droneState.armed && cur.phase === 'playing') {
+          droneRig.frontLedMat.emissive.setHex(0xf59e0b);
+          droneRig.rearLedMat.emissive.setHex(0xf59e0b);
         }
         scene.add(droneRig.root);
         scene.add(droneRig.contactShadow);
@@ -383,6 +430,10 @@ export function DroneCanvas(props: SimBridgeProps) {
 
       if (cur.phase === 'title') {
         // Title screen: Live orbital camera tour around the sunlit airfield & hovering drone
+        droneRig.frontLedMat.emissive.setHex(0x38bdf8);
+        droneRig.frontLedMat.emissiveIntensity = 2.2;
+        droneRig.rearLedMat.emissive.setHex(0xef4444);
+        droneRig.rearLedMat.emissiveIntensity = 2.2;
         const tourAngle = elapsed * (cur.showcaseDrone ? 0.36 : 0.18);
         const hoverY = 3.2 + Math.sin(elapsed * 1.6) * (cur.showcaseDrone ? 0.08 : 0.22);
         droneRig.root.visible = true;
@@ -433,9 +484,56 @@ export function DroneCanvas(props: SimBridgeProps) {
       } else if (cur.phase === 'playing') {
         if (!crashTumble.active) {
           activeSticks = sampleCombinedSticks(gpSample.sticks);
+          const controllerSticks = sampleControllerSticks(gpSample.sticks);
+          const armDt = Math.min(Math.max(rawDt, 0.001), 0.5);
+          const armRes = stepArmingState(
+            armingProgress,
+            droneState.armed,
+            droneState.crashed,
+            keys.has('KeyV'),
+            controllerSticks,
+            armDt
+          );
+          armingProgress = armRes.armingProgress;
+          if (armRes.justArmed) {
+            droneState.armed = true;
+            audio.playArmChime();
+            lastHudEmitTime = 0;
+          }
+
+          const prevGateLocked = awaitingStickRelease;
+          const gate = resolvePostArmStickGate(
+            awaitingStickRelease,
+            droneState.armed,
+            armRes.justArmed,
+            activeSticks
+          );
+          awaitingStickRelease = gate.awaitingStickRelease;
+          if (prevGateLocked && !awaitingStickRelease) {
+            lastHudEmitTime = 0;
+          }
+          const flightSticks = gate.flightSticks;
+
+          if (!droneState.armed) {
+            const ledHex = armingProgress > 0.5 ? 0x34d399 : 0xf59e0b;
+            const ledPulse =
+              armingProgress > 0
+                ? 1.5 + Math.sin(elapsed * 22) * 1.1
+                : 0.55 + (0.5 + 0.5 * Math.sin(elapsed * 3.8)) * 1.1;
+            droneRig.frontLedMat.emissive.setHex(ledHex);
+            droneRig.rearLedMat.emissive.setHex(ledHex);
+            droneRig.frontLedMat.emissiveIntensity = ledPulse;
+            droneRig.rearLedMat.emissiveIntensity = ledPulse;
+          } else {
+            droneRig.frontLedMat.emissive.setHex(0x38bdf8);
+            droneRig.frontLedMat.emissiveIntensity = 2.2;
+            droneRig.rearLedMat.emissive.setHex(0xef4444);
+            droneRig.rearLedMat.emissiveIntensity = 2.2;
+          }
+
           droneState = stepDronePhysics(
             droneState,
-            activeSticks,
+            flightSticks,
             { flightMode: cur.flightMode, windEnabled: cur.windEnabled, windTimeSec: elapsed, turbineAngle },
             dt
           );
@@ -642,14 +740,22 @@ export function DroneCanvas(props: SimBridgeProps) {
 
       world.updateMissionVisuals(missionDef, missionProgress, elapsed);
 
-      // Throttled HUD updates (~10Hz) so React never reconciles at 60Hz
-      if (now - lastHudEmitTime >= 95) {
+      // Throttled HUD updates (~10Hz normal, ~20Hz while charging arming bar)
+      const hudIntervalMs = armingProgress > 0 ? 45 : 95;
+      if (now - lastHudEmitTime >= hudIntervalMs) {
         lastHudEmitTime = now;
-        const telemetry = extractTelemetry(droneState, cur.flightMode, cur.cameraMode, {
-          flightMode: cur.flightMode,
-          windEnabled: cur.windEnabled,
-          windTimeSec: elapsed,
-        });
+        const telemetry = extractTelemetry(
+          droneState,
+          cur.flightMode,
+          cur.cameraMode,
+          {
+            flightMode: cur.flightMode,
+            windEnabled: cur.windEnabled,
+            windTimeSec: elapsed,
+          },
+          armingProgress,
+          awaitingStickRelease
+        );
         cur.onHudUpdate(telemetry, missionProgress, activeSticks);
       }
 

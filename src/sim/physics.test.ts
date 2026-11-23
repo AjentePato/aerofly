@@ -37,19 +37,36 @@ import {
   pickRelayTransport,
   sticksChangedSignificantly,
 } from './stickProtocol';
+import {
+  ARM_HOLD_DURATION_SEC,
+  NEUTRAL_STICKS,
+  isCscArmGesture,
+  resolvePostArmStickGate,
+  stepArmingState,
+} from './arming';
 import type { PhysicsConfig, StickInput } from './types';
 
 const neutralInput: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
 const normalConfig: PhysicsConfig = { flightMode: 'normal', windEnabled: false, windTimeSec: 0 };
 
-test('initial drone spawns safely on flat main helipad facing north (-Z)', () => {
-  const state = createInitialDroneState();
+test('initial drone spawns disarmed on flat main helipad facing north (-Z) and ignores climb until armed', () => {
+  let state = createInitialDroneState();
+  assert.equal(state.armed, false);
   assert.equal(state.onGround, true);
   assert.equal(state.crashed, false);
   assert.equal(state.yaw, 0);
   assert.ok(state.position.y > 0.2 && state.position.y < 0.6);
   assert.equal(groundHeightAt(0, 0), 0);
   assert.ok(surfaceHeightAt(0, 0, 1) > 0);
+
+  // Full throttle while disarmed keeps drone seated with zero motor power
+  for (let i = 0; i < 60; i++) {
+    state = stepDronePhysics(state, { throttle: 1, yaw: 0, pitch: 0.5, roll: 0 }, normalConfig, 1 / 60);
+  }
+  assert.equal(state.armed, false);
+  assert.equal(state.onGround, true);
+  assert.equal(state.motorPower, 0);
+  assert.equal(state.batteryPct, 100);
 });
 
 test('drone survives first 2 seconds with zero input without crashing', () => {
@@ -64,7 +81,7 @@ test('drone survives first 2 seconds with zero input without crashing', () => {
 });
 
 test('positive throttle climbs and forward pitch moves toward -Z', () => {
-  let state = createInitialDroneState();
+  let state = createInitialDroneState(true);
   const climbInput: StickInput = { throttle: 0.85, yaw: 0, pitch: 0, roll: 0 };
   for (let i = 0; i < 90; i++) {
     state = stepDronePhysics(state, climbInput, normalConfig, 1 / 60);
@@ -81,7 +98,7 @@ test('positive throttle climbs and forward pitch moves toward -Z', () => {
 });
 
 test('sport mode tilts farther than normal mode and auto-levels smoothly on release', () => {
-  let state = createInitialDroneState();
+  let state = createInitialDroneState(true);
   state.position.y = 20;
   state.onGround = false;
 
@@ -108,7 +125,7 @@ test('body up vector tilts forward (-Z) when pitch is negative', () => {
 
 test('hover_takeoff mission completes after holding inside target zone for 3s', () => {
   let progress = createInitialMissionProgress('hover_takeoff');
-  const hoveringDrone = createInitialDroneState();
+  const hoveringDrone = createInitialDroneState(true);
   hoveringDrone.onGround = false;
   hoveringDrone.position = { x: 0.5, y: 6.5, z: -0.5 };
 
@@ -122,7 +139,7 @@ test('hover_takeoff mission completes after holding inside target zone for 3s', 
 
 test('gate_circuit mission advances sequentially through gates', () => {
   let progress = createInitialMissionProgress('gate_circuit');
-  const drone = createInitialDroneState();
+  const drone = createInitialDroneState(true);
   drone.onGround = false;
   drone.position = { x: 0, y: 5.5, z: -22 };
 
@@ -133,7 +150,7 @@ test('gate_circuit mission advances sequentially through gates', () => {
 });
 
 test('floating joystick centers exactly where user touches with zero initial drift', () => {
-  const origin = computeFloatingStickOrigin(142, 218, { x: 0, y: 0 }, 72, false);
+  const origin = computeFloatingStickOrigin(142, 218);
   const initialVal = computeFloatingStickValue(142, 218, origin, 72);
   assert.equal(initialVal.x, 0);
   assert.equal(initialVal.y, 0);
@@ -146,16 +163,9 @@ test('floating joystick centers exactly where user touches with zero initial dri
   assert.ok(Math.abs(Math.hypot(clampedDiag.x, clampedDiag.y) - 1) < 1e-6);
 });
 
-test('floating joystick preserves sticky throttle smoothly on re-touch', () => {
-  const origin = computeFloatingStickOrigin(100, 200, { x: 0, y: 0.5 }, 80, true);
-  const initialVal = computeFloatingStickValue(100, 200, origin, 80);
-  assert.equal(initialVal.x, 0);
-  assert.ok(Math.abs(initialVal.y - 0.5) < 1e-6);
-});
-
 test('expanded world supports wide-open flight beyond 250m', () => {
   assert.ok(WORLD_RADIUS >= 350);
-  let drone = createInitialDroneState();
+  let drone = createInitialDroneState(true);
   drone.onGround = false;
   drone.position = { x: 240, y: 25, z: -200 };
   drone = stepDronePhysics(drone, neutralInput, normalConfig, 1 / 60);
@@ -170,7 +180,7 @@ test('structure_slalom openings are genuinely unobstructed for precision flight'
     // Fly straight through each gate along its yaw axis for 14m (-7m to +7m)
     const dirX = -Math.sin(g.yaw);
     const dirZ = -Math.cos(g.yaw);
-    let drone = createInitialDroneState();
+    let drone = createInitialDroneState(true);
     drone.onGround = false;
     drone.yaw = g.yaw;
     drone.position = { x: g.x - dirX * 7, y: g.y, z: g.z - dirZ * 7 };
@@ -195,7 +205,7 @@ test('abandoned house brick wall crashes at high speed and bounces gently at low
   const baseY = groundHeightAt(-82, -48) + STRUCTURE_SLAB_ELEVATION;
 
   // High speed slam (14 m/s from 1.2m outside the wall) -> crashes
-  let fastDrone = createInitialDroneState();
+  let fastDrone = createInitialDroneState(true);
   fastDrone.onGround = false;
   fastDrone.position = { x: wallX + s * 1.2, y: baseY + 1.7, z: wallZ + c * 1.2 };
   fastDrone.velocity = { x: -s * 14, y: 0, z: -c * 14 };
@@ -207,7 +217,7 @@ test('abandoned house brick wall crashes at high speed and bounces gently at low
   assert.equal(fastDrone.crashed, true, 'Expected high-speed wall impact to crash');
 
   // Gentle bump (3 m/s from 1.0m outside the wall) -> rebounds without crashing
-  let slowDrone = createInitialDroneState();
+  let slowDrone = createInitialDroneState(true);
   slowDrone.onGround = false;
   slowDrone.position = { x: wallX + s * 1.0, y: baseY + 1.7, z: wallZ + c * 1.0 };
   slowDrone.velocity = { x: -s * 3, y: 0, z: -c * 3 };
@@ -251,7 +261,7 @@ test('wind turbine mast and spinning blades have real hitboxes', () => {
   const baseY = groundHeightAt(wt.x, wt.z);
 
   // 1. Slam into mast at mid-height
-  let mastDrone = createInitialDroneState();
+  let mastDrone = createInitialDroneState(true);
   mastDrone.onGround = false;
   mastDrone.position = { x: wt.x + 1.8, y: baseY + 14, z: wt.z };
   mastDrone.velocity = { x: -12, y: 0, z: 0 };
@@ -267,7 +277,7 @@ test('wind turbine mast and spinning blades have real hitboxes', () => {
   // Hub is at local (0, 28.2, 2.4); blade #0 at 6m up is local (0, 34.2, 2.4)
   const worldBladeX = wt.x + 2.4 * s;
   const worldBladeZ = wt.z + 2.4 * c;
-  let bladeDrone = createInitialDroneState();
+  let bladeDrone = createInitialDroneState(true);
   bladeDrone.onGround = false;
   bladeDrone.position = { x: worldBladeX, y: baseY + 34.2, z: worldBladeZ };
   bladeDrone = stepDronePhysics(bladeDrone, neutralInput, { ...normalConfig, turbineAngle: 0 }, 1 / 60);
@@ -340,7 +350,7 @@ test('no structure-mounted ring torus clips through bars, walls, or floors', () 
 });
 
 test('Q/E yaw turning accelerates smoothly and eases out when released', () => {
-  let drone = createInitialDroneState();
+  let drone = createInitialDroneState(true);
   drone.onGround = false;
   drone.position = { x: 0, y: 12, z: 0 };
 
@@ -366,7 +376,7 @@ test('all pine trees have real trunk and foliage cone collisions and keep gates 
   const t = trees[0];
 
   // 1. High-speed slam into tree trunk crashes
-  let trunkSlam = createInitialDroneState();
+  let trunkSlam = createInitialDroneState(true);
   trunkSlam.onGround = false;
   trunkSlam.position = { x: t.x + 1.2, y: t.baseY + 1.2 * t.scale, z: t.z };
   trunkSlam.velocity = { x: -12, y: 0, z: 0 };
@@ -377,7 +387,7 @@ test('all pine trees have real trunk and foliage cone collisions and keep gates 
   assert.equal(trunkSlam.crashed, true, 'Expected high-speed tree trunk impact to crash');
 
   // 2. High-speed fly into pine cone foliage crashes
-  let foliageSlam = createInitialDroneState();
+  let foliageSlam = createInitialDroneState(true);
   foliageSlam.onGround = false;
   foliageSlam.position = { x: t.x + 2.5 * t.scale, y: t.baseY + 3.5 * t.scale, z: t.z };
   foliageSlam.velocity = { x: -12, y: 0, z: 0 };
@@ -388,7 +398,7 @@ test('all pine trees have real trunk and foliage cone collisions and keep gates 
   assert.equal(foliageSlam.crashed, true, 'Expected high-speed pine foliage impact to crash');
 
   // 3. Low-speed touch against pine foliage bounces cleanly without crashing
-  let foliageTouch = createInitialDroneState();
+  let foliageTouch = createInitialDroneState(true);
   foliageTouch.onGround = false;
   foliageTouch.position = { x: t.x + 2.0 * t.scale, y: t.baseY + 3.5 * t.scale, z: t.z };
   foliageTouch.velocity = { x: -3, y: 0, z: 0 };
@@ -433,7 +443,7 @@ test('Xbox/DS4 gamepad stick deadzone and smooth Mode-2 axis mapping', () => {
   assert.deepEqual(active, { throttle: 1, yaw: 1, pitch: 1, roll: -1 });
 
   // Drives drone physics cleanly (climb + pitch forward) using only sticks
-  let drone = createInitialDroneState();
+  let drone = createInitialDroneState(true);
   const stickCmd = mapStandardGamepadToSticks([0, -0.85, 0, -0.6]);
   for (let i = 0; i < 60; i++) {
     drone = stepDronePhysics(drone, stickCmd, normalConfig, 1 / 60);
@@ -460,7 +470,7 @@ test('pickPrimaryGamepad prioritizes connected standard controllers and supports
 });
 
 test('crash animation tumbles mid-air drone, breaks propellers, bounces on ground, and completes cleanly', () => {
-  const crashedState = createInitialDroneState();
+  const crashedState = createInitialDroneState(true);
   crashedState.onGround = false;
   crashedState.crashed = true;
   crashedState.position = { x: 0, y: 12, z: -20 };
@@ -601,6 +611,133 @@ test('drone skins catalog includes default, Drone Branco Moderno, and Drone FPV 
   assert.equal(getDroneSkinOption('fpv_freestyle').name, 'Drone FPV Freestyle');
   assert.equal(getDroneSkinOption('default').name, 'Drone Padrão');
 });
+
+test('motor arming supports KeyV, generous imprecise controller CSC sticks, and locks motion until sticks release', () => {
+  // 1. Imprecise budget gamepad inward-down diagonal (~45-55% throw) still triggers arming cleanly
+  const impreciseControllerInwardDown = mapStandardGamepadToSticks([0.46, 0.52, -0.44, 0.5]);
+  assert.equal(isCscArmGesture(impreciseControllerInwardDown), true);
+
+  // Full inward-down sticks also work
+  const fullInwardDown = mapStandardGamepadToSticks([1, 1, -1, 1]);
+  assert.equal(isCscArmGesture(fullInwardDown), true);
+
+  // Outward-down or inward-up sticks must NOT trigger arming
+  assert.equal(isCscArmGesture({ throttle: -1, yaw: -1, pitch: -1, roll: 1 }), false);
+  assert.equal(isCscArmGesture({ throttle: 1, yaw: 1, pitch: 1, roll: -1 }), false);
+  assert.equal(isCscArmGesture(neutralInput), false);
+
+  // 2. Holding KeyV reaches armed after ARM_HOLD_DURATION_SEC and decays if released early
+  let progress = 0;
+  let armed = false;
+  for (let i = 0; i < 15; i++) {
+    const step = stepArmingState(progress, armed, false, true, neutralInput, 1 / 60);
+    progress = step.armingProgress;
+    armed = step.armed;
+    assert.equal(step.justArmed, false);
+  }
+  assert.ok(progress > 0.2 && armed === false);
+
+  const released = stepArmingState(progress, armed, false, false, neutralInput, 0.05);
+  assert.ok(released.armingProgress < progress && released.armed === false);
+
+  // Hold imprecise controller CSC inward-down gesture until armed
+  progress = 0;
+  let justArmedTriggered = false;
+  const totalFrames = Math.ceil((ARM_HOLD_DURATION_SEC + 0.15) * 60);
+  for (let i = 0; i < totalFrames; i++) {
+    const step = stepArmingState(progress, armed, false, false, impreciseControllerInwardDown, 1 / 60);
+    progress = step.armingProgress;
+    armed = step.armed;
+    if (step.justArmed) {
+      justArmedTriggered = true;
+      break;
+    }
+  }
+  assert.equal(armed, true);
+  assert.equal(justArmedTriggered, true);
+  assert.equal(progress, 0);
+
+  // 3. Post-arming safety gate: blocks movement while sticks are still held from arming, unlocks once released
+  const lockedRightAfterArm = resolvePostArmStickGate(false, true, true, impreciseControllerInwardDown);
+  assert.equal(lockedRightAfterArm.awaitingStickRelease, true);
+  assert.deepEqual(lockedRightAfterArm.flightSticks, NEUTRAL_STICKS);
+
+  // Half-released stick (still yawing/tilting) remains locked with zero flight command
+  const partiallyReleased = resolvePostArmStickGate(
+    lockedRightAfterArm.awaitingStickRelease,
+    true,
+    false,
+    { throttle: -0.3, yaw: 0.35, pitch: 0, roll: 0 }
+  );
+  assert.equal(partiallyReleased.awaitingStickRelease, true);
+  assert.deepEqual(partiallyReleased.flightSticks, NEUTRAL_STICKS);
+
+  // Returned to center (within neutral band) -> unlocks flight!
+  const centered = resolvePostArmStickGate(
+    partiallyReleased.awaitingStickRelease,
+    true,
+    false,
+    { throttle: 0.05, yaw: -0.04, pitch: 0.02, roll: 0 }
+  );
+  assert.equal(centered.awaitingStickRelease, false);
+
+  // Next stick push now moves the drone freely
+  const nextMove = { throttle: 0.8, yaw: 0, pitch: 0.4, roll: 0 };
+  const unlockedMove = resolvePostArmStickGate(centered.awaitingStickRelease, true, false, nextMove);
+  assert.equal(unlockedMove.awaitingStickRelease, false);
+  assert.deepEqual(unlockedMove.flightSticks, nextMove);
+
+  // Arming with KeyV while sticks are neutral never triggers lock
+  const armedWithKeyV = resolvePostArmStickGate(false, true, true, neutralInput);
+  assert.equal(armedWithKeyV.awaitingStickRelease, false);
+
+  // 4. Mission elapsed timer stays paused at 0s while disarmed, then starts ticking once armed
+  let missionProg = createInitialMissionProgress('hover_takeoff');
+  const disarmedDrone = createInitialDroneState(false);
+  missionProg = evaluateMissionStep(missionProg, disarmedDrone, 1.0).progress;
+  assert.equal(missionProg.elapsedSec, 0);
+
+  const armedDrone = createInitialDroneState(true);
+  missionProg = evaluateMissionStep(missionProg, armedDrone, 1.0).progress;
+  assert.equal(missionProg.elapsedSec, 1.0);
+});
+
+test('armed drone resting on a surface ignores pitch, roll, yaw, and wind until upward throttle lifts off', () => {
+  let drone = createInitialDroneState(true);
+  const startPos = { ...drone.position };
+  const windySport: PhysicsConfig = { flightMode: 'sport', windEnabled: true, windTimeSec: 5 };
+
+  // Full pitch, roll, yaw, and downward throttle while sitting on helipad -> stays completely still & level
+  for (let i = 0; i < 60; i++) {
+    drone = stepDronePhysics(
+      drone,
+      { throttle: -0.5, yaw: 1, pitch: 1, roll: -1 },
+      windySport,
+      1 / 60
+    );
+  }
+  assert.equal(drone.onGround, true);
+  assert.ok(Math.abs(drone.position.x - startPos.x) < 1e-4);
+  assert.ok(Math.abs(drone.position.y - startPos.y) < 1e-4);
+  assert.ok(Math.abs(drone.position.z - startPos.z) < 1e-4);
+  assert.ok(Math.abs(drone.yaw) < 1e-4);
+  assert.ok(Math.abs(drone.pitch) < 1e-4);
+  assert.ok(Math.abs(drone.roll) < 1e-4);
+
+  // Even while holding pitch+roll+yaw, holding Space / throttle up lifts off vertically first, then flies in the air
+  for (let i = 0; i < 45; i++) {
+    drone = stepDronePhysics(
+      drone,
+      { throttle: 0.9, yaw: 0.6, pitch: 0.7, roll: 0 },
+      normalConfig,
+      1 / 60
+    );
+  }
+  assert.equal(drone.onGround, false);
+  assert.ok(drone.position.y > startPos.y + 1.0, `Expected drone to climb into air, got y=${drone.position.y}`);
+  assert.ok(Math.abs(drone.yaw) > 0.1, 'Expected yaw to work once airborne');
+});
+
 
 
 

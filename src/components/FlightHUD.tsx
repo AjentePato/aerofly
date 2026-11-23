@@ -1,4 +1,5 @@
-import { AlertTriangle, Camera, Gamepad2, Pause, RotateCcw, Smartphone, Volume2, VolumeX } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Camera, CheckCircle2, Gamepad2, Pause, Power, RotateCcw, Smartphone, Volume2, VolumeX } from 'lucide-react';
 import { getMissionById } from '../sim/missions';
 import type {
   CameraMode,
@@ -73,6 +74,27 @@ export function FlightHUD({
   const rollRad = (telemetry.rollDeg * Math.PI) / 180;
   const pitchOffset = Math.max(-28, Math.min(28, telemetry.pitchDeg * 0.7));
 
+  const prevReadyRef = useRef(telemetry.armed && !telemetry.awaitingStickRelease);
+  const [armedToastVisible, setArmedToastVisible] = useState(false);
+
+  useEffect(() => {
+    let timer = 0;
+    const isReadyToFly = telemetry.armed && !telemetry.awaitingStickRelease && !telemetry.crashed;
+    if (!prevReadyRef.current && isReadyToFly) {
+      setArmedToastVisible(true);
+      timer = window.setTimeout(() => setArmedToastVisible(false), 1800);
+    } else if (!telemetry.armed || telemetry.crashed) {
+      setArmedToastVisible(false);
+    }
+    prevReadyRef.current = isReadyToFly;
+    return () => {
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [telemetry.armed, telemetry.awaitingStickRelease, telemetry.crashed]);
+
+  const armPct = Math.round(telemetry.armingProgress * 100);
+  const isChargingArm = telemetry.armingProgress > 0.01;
+
   return (
     <div className="fixed inset-0 z-10 pointer-events-none select-none flex flex-col justify-between p-4 md:p-6">
       {/* Brief peripheral crash impact flash & status during tumble sequence */}
@@ -93,6 +115,87 @@ export function FlightHUD({
             <span>Impacto Detectado</span>
           </div>
         </>
+      )}
+
+      {/* Disarmed Motor Ignition Prompt (non-blocking, keeps drone & center reticle clear) */}
+      {!telemetry.armed && !telemetry.crashed && (
+        <div
+          data-testid="disarmed-arm-banner"
+          className={`fixed bottom-24 md:bottom-auto md:top-5 left-1/2 -translate-x-1/2 z-20 w-[min(92vw,410px)] rounded-xl px-4 py-3 border shadow-xl transition-colors ${
+            isChargingArm ? 'border-emerald-400/80' : 'border-amber-500/60'
+          }`}
+          style={{ backgroundColor: 'rgba(8, 13, 24, 0.92)' }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <Power
+                className={`w-4 h-4 shrink-0 ${
+                  isChargingArm ? 'text-emerald-400 animate-pulse' : 'text-amber-400'
+                }`}
+                aria-hidden="true"
+              />
+              <span className="text-xs font-display font-bold tracking-wide uppercase text-white truncate">
+                {isChargingArm ? 'Ligando Motores...' : 'Drone Desligado'}
+              </span>
+            </div>
+
+            {/* Mini Mode-2 CSC Stick Diagram: both sticks down & inward */}
+            <svg
+              viewBox="0 0 64 28"
+              className="w-14 h-7 shrink-0"
+              aria-label="Sticks na diagonal para baixo e para dentro"
+            >
+              <circle cx="15" cy="14" r="11" fill="rgba(15,23,42,0.9)" stroke="rgba(148,163,184,0.45)" strokeWidth="1.2" />
+              <line x1="15" y1="14" x2="21" y2="20" stroke="#f59e0b" strokeWidth="1.8" strokeLinecap="round" />
+              <circle cx="21" cy="20" r="3" fill={isChargingArm ? '#34d399' : '#f59e0b'} />
+              <circle cx="49" cy="14" r="11" fill="rgba(15,23,42,0.9)" stroke="rgba(148,163,184,0.45)" strokeWidth="1.2" />
+              <line x1="49" y1="14" x2="43" y2="20" stroke="#f59e0b" strokeWidth="1.8" strokeLinecap="round" />
+              <circle cx="43" cy="20" r="3" fill={isChargingArm ? '#34d399' : '#f59e0b'} />
+            </svg>
+          </div>
+
+          <p className="mt-1.5 text-[11px] leading-snug text-slate-200">
+            Segure <span className="font-mono font-bold text-amber-300">V</span> no teclado, ou os dois sticks do controle para baixo e para dentro.
+          </p>
+
+          <div className="mt-2 flex items-center gap-2">
+            <div className="flex-1 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className={`h-full transition-all duration-100 ${
+                  isChargingArm ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+                style={{ width: `${armPct}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono tabular-nums text-slate-300 w-8 text-right">
+              {armPct}%
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Post-Arming Safety Gate: hold flight response until sticks are released to neutral */}
+      {telemetry.armed && telemetry.awaitingStickRelease && !telemetry.crashed && (
+        <div
+          data-testid="awaiting-stick-release-banner"
+          className="fixed bottom-24 md:bottom-auto md:top-5 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-lg border border-amber-400/75 text-amber-100 text-xs font-display font-bold tracking-wide uppercase flex items-center gap-2 shadow-lg"
+          style={{ backgroundColor: 'rgba(26, 20, 6, 0.92)' }}
+        >
+          <Power className="w-4 h-4 text-amber-400 shrink-0" aria-hidden="true" />
+          <span>Motores Ligados · Solte os sticks para voar</span>
+        </div>
+      )}
+
+      {/* Brief Ignition Confirmation Toast */}
+      {armedToastVisible && telemetry.armed && !telemetry.awaitingStickRelease && !telemetry.crashed && (
+        <div
+          data-testid="armed-confirm-banner"
+          className="fixed bottom-24 md:bottom-auto md:top-5 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-lg border border-emerald-400/70 text-emerald-100 text-xs font-display font-bold tracking-wide uppercase flex items-center gap-2 shadow-lg"
+          style={{ backgroundColor: 'rgba(6, 32, 24, 0.92)' }}
+        >
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
+          <span>Motores Ligados · Pronto para Voar</span>
+        </div>
       )}
 
       {/* Top Perimeter Row */}

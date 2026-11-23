@@ -182,7 +182,7 @@ export function applyDeadzoneAndExpo(value: number, deadzone = 0.06, expo = 0.35
   return Math.sign(clamped) * curved;
 }
 
-export function createInitialDroneState(): DronePhysicsState {
+export function createInitialDroneState(armed = false): DronePhysicsState {
   const startY = surfaceHeightAt(0, 0, 1) + DRONE_SKID_HEIGHT;
   return {
     position: { x: 0, y: startY, z: 0 },
@@ -192,7 +192,7 @@ export function createInitialDroneState(): DronePhysicsState {
     roll: 0,
     angVel: { x: 0, y: 0, z: 0 },
     motorPower: 0,
-    armed: true,
+    armed,
     onGround: true,
     crashed: false,
     batteryPct: 100,
@@ -238,10 +238,11 @@ export function stepDronePhysics(
     return next;
   }
 
+  const onSurface = prev.onGround;
   const throttleIn = clamp(rawInput.throttle, -1, 1);
-  const yawIn = applyDeadzoneAndExpo(rawInput.yaw, 0.05, 0.3);
-  const pitchIn = applyDeadzoneAndExpo(rawInput.pitch, 0.05, 0.35);
-  const rollIn = applyDeadzoneAndExpo(rawInput.roll, 0.05, 0.35);
+  const yawIn = onSurface ? 0 : applyDeadzoneAndExpo(rawInput.yaw, 0.05, 0.3);
+  const pitchIn = onSurface ? 0 : applyDeadzoneAndExpo(rawInput.pitch, 0.05, 0.35);
+  const rollIn = onSurface ? 0 : applyDeadzoneAndExpo(rawInput.roll, 0.05, 0.35);
 
   const batteryEmpty = next.batteryPct <= 0.1;
   const effectiveArmed = next.armed && !batteryEmpty;
@@ -264,19 +265,28 @@ export function stepDronePhysics(
     const maxClimb = isNormal ? 6.5 : 10.5;
     const maxDescend = isNormal ? 4.5 : 7.0;
 
-    const targetPitch = -pitchIn * maxTiltRad;
-    const targetRoll = -rollIn * maxTiltRad;
-    const tiltLambda = isNormal ? 9.5 : 12.5;
-    const tiltAlpha = 1 - Math.exp(-tiltLambda * dt);
+    if (next.onGround) {
+      // Keep the drone completely level and stationary on any surface until lifted into the air
+      next.pitch *= Math.exp(-14 * dt);
+      next.roll *= Math.exp(-14 * dt);
+      next.angVel.y = 0;
+      next.velocity.x = 0;
+      next.velocity.z = 0;
+    } else {
+      const targetPitch = -pitchIn * maxTiltRad;
+      const targetRoll = -rollIn * maxTiltRad;
+      const tiltLambda = isNormal ? 9.5 : 12.5;
+      const tiltAlpha = 1 - Math.exp(-tiltLambda * dt);
 
-    next.pitch += (targetPitch - next.pitch) * tiltAlpha;
-    next.roll += (targetRoll - next.roll) * tiltAlpha;
+      next.pitch += (targetPitch - next.pitch) * tiltAlpha;
+      next.roll += (targetRoll - next.roll) * tiltAlpha;
 
-    // Smooth yaw inertia & damping so Q/E turns accelerate and settle fluidly
-    const targetYawRate = next.onGround && throttleIn <= -0.85 ? 0 : -yawIn * maxYawRate;
-    const yawLambda = isNormal ? 11.5 : 14.0;
-    next.angVel.y += (targetYawRate - next.angVel.y) * (1 - Math.exp(-yawLambda * dt));
-    next.yaw += next.angVel.y * dt;
+      // Smooth yaw inertia & damping so Q/E turns accelerate and settle fluidly
+      const targetYawRate = -yawIn * maxYawRate;
+      const yawLambda = isNormal ? 11.5 : 14.0;
+      next.angVel.y += (targetYawRate - next.angVel.y) * (1 - Math.exp(-yawLambda * dt));
+      next.yaw += next.angVel.y * dt;
+    }
 
     // Vertical velocity target with altitude hold around deadzone
     const thrDead = applyDeadzoneAndExpo(throttleIn, 0.08, 0.2);
@@ -288,8 +298,6 @@ export function stepDronePhysics(
     if (next.onGround && thrDead <= 0.02) {
       next.motorPower += (0.12 - next.motorPower) * (1 - Math.exp(-10 * dt));
       next.velocity.y = Math.min(0, next.velocity.y);
-      next.pitch *= Math.exp(-10 * dt);
-      next.roll *= Math.exp(-10 * dt);
     } else {
       const vyLambda = isNormal ? 5.2 : 3.6;
       const vyError = desiredVy - next.velocity.y;
@@ -634,12 +642,12 @@ export function stepDronePhysics(
       } else {
         next.position.y = b.cy + b.hy + DRONE_SKID_HEIGHT;
         next.velocity.y = Math.max(0, next.velocity.y);
-        const skidFriction = Math.exp(-10 * dt);
-        next.velocity.x *= skidFriction;
-        next.velocity.z *= skidFriction;
-        next.pitch *= Math.exp(-8 * dt);
-        next.roll *= Math.exp(-8 * dt);
+        next.velocity.x = 0;
+        next.velocity.z = 0;
+        next.pitch *= Math.exp(-12 * dt);
+        next.roll *= Math.exp(-12 * dt);
         next.angVel.x = 0;
+        next.angVel.y = 0;
         next.angVel.z = 0;
         landedOnStructure = true;
       }
@@ -689,15 +697,14 @@ export function stepDronePhysics(
     } else {
       next.position.y = minDroneY;
       next.velocity.y = Math.max(0, next.velocity.y);
-      // Skid friction
-      const skidFriction = Math.exp(-10 * dt);
-      next.velocity.x *= skidFriction;
-      next.velocity.z *= skidFriction;
+      next.velocity.x = 0;
+      next.velocity.z = 0;
       next.onGround = true;
-      // Gently level skids on ground
-      next.pitch *= Math.exp(-8 * dt);
-      next.roll *= Math.exp(-8 * dt);
+      // Keep skids level and stationary on ground
+      next.pitch *= Math.exp(-12 * dt);
+      next.roll *= Math.exp(-12 * dt);
       next.angVel.x = 0;
+      next.angVel.y = 0;
       next.angVel.z = 0;
     }
   } else {
@@ -759,7 +766,9 @@ export function extractTelemetry(
   state: DronePhysicsState,
   flightMode: FlightMode,
   cameraMode: DroneTelemetry['cameraMode'],
-  config: PhysicsConfig
+  config: PhysicsConfig,
+  armingProgress = 0,
+  awaitingStickRelease = false
 ): DroneTelemetry {
   const floorY = surfaceHeightAt(state.position.x, state.position.z, state.position.y);
   const agl = Math.max(0, state.position.y - DRONE_SKID_HEIGHT - floorY);
@@ -781,6 +790,8 @@ export function extractTelemetry(
     rollDeg: (-state.roll * 180) / Math.PI,
     batteryPct: state.batteryPct,
     armed: state.armed,
+    armingProgress: state.armed ? 0 : clamp(armingProgress, 0, 1),
+    awaitingStickRelease: state.armed ? awaitingStickRelease : false,
     onGround: state.onGround,
     crashed: state.crashed,
     flightMode,

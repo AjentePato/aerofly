@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Compass, RotateCcw, Wifi, WifiOff, ArrowLeft, Zap } from 'lucide-react';
+import { Camera, RotateCcw, Wifi, WifiOff, ArrowLeft, Zap } from 'lucide-react';
 import {
   computeFloatingStickOrigin,
   computeFloatingStickValue,
@@ -26,13 +26,11 @@ const MIN_SEND_INTERVAL_MS = 12; // ~83Hz max rate; 0 packets when idle
 function FloatingTouchZone({
   label,
   subLabel,
-  stickyY,
   side,
   onStickSample,
 }: {
   label: string;
   subLabel: string;
-  stickyY?: boolean;
   side: 'left' | 'right';
   onStickSample: (pos: StickVec, immediate: boolean) => void;
 }) {
@@ -101,13 +99,7 @@ function FloatingTouchZone({
     rectRef.current = e.currentTarget.getBoundingClientRect();
 
     const local = toLocalCoords(e.clientX, e.clientY);
-    const origin = computeFloatingStickOrigin(
-      local.x,
-      local.y,
-      valueRef.current,
-      STICK_RADIUS_PX,
-      Boolean(stickyY)
-    );
+    const origin = computeFloatingStickOrigin(local.x, local.y);
     originRef.current = origin;
     setActiveOrigin(origin);
 
@@ -146,10 +138,7 @@ function FloatingTouchZone({
     rectRef.current = null;
     setActiveOrigin(null);
 
-    const releaseVal: StickVec = {
-      x: 0,
-      y: stickyY ? valueRef.current.y : 0,
-    };
+    const releaseVal: StickVec = { x: 0, y: 0 };
     valueRef.current = releaseVal;
     syncVisuals(releaseVal, true);
     onStickSample(releaseVal, true);
@@ -228,8 +217,6 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
   const [wsConnected, setWsConnected] = useState(false);
   const [simOnline, setSimOnline] = useState(false);
   const [p2pConnected, setP2pConnected] = useState(false);
-  const [stickyThrottle, setStickyThrottle] = useState(false);
-  const [gyroEnabled, setGyroEnabled] = useState(false);
   const [telemetry, setTelemetry] = useState<DroneTelemetry | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -471,18 +458,6 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
     };
   }, [activeRoom, flushTransmit]);
 
-  useEffect(() => {
-    if (!gyroEnabled) return;
-    const onOrient = (e: DeviceOrientationEvent) => {
-      if (e.beta === null || e.gamma === null) return;
-      const roll = Math.max(-1, Math.min(1, e.gamma / 30));
-      const pitch = Math.max(-1, Math.min(1, (35 - e.beta) / 30));
-      handleRightStickSample({ x: roll, y: pitch }, false);
-    };
-    window.addEventListener('deviceorientation', onOrient);
-    return () => window.removeEventListener('deviceorientation', onOrient);
-  }, [gyroEnabled, handleRightStickSample]);
-
   const sendAction = (action: string) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -619,12 +594,11 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
       </div>
 
       {/* Split 50/50 Left & Right Floating Touch Arena */}
-      <div className="flex-1 min-h-0 grid grid-cols-2 my-2 rounded-xl border border-slate-800/80 bg-slate-900/35 overflow-hidden">
+      <div className="flex-1 min-h-0 grid grid-cols-2 mt-2 rounded-xl border border-slate-800/80 bg-slate-900/35 overflow-hidden">
         <FloatingTouchZone
           side="left"
           label="Stick Esquerdo"
           subLabel="Acelerador / Yaw"
-          stickyY={stickyThrottle}
           onStickSample={handleLeftStickSample}
         />
 
@@ -634,34 +608,6 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
           subLabel="Pitch / Roll"
           onStickSample={handleRightStickSample}
         />
-      </div>
-
-      {/* Bottom Ergonomic Option Strip */}
-      <div className="flex flex-wrap items-center justify-center gap-2 shrink-0">
-        <button
-          type="button"
-          onClick={() => setStickyThrottle((v) => !v)}
-          className={`min-h-[40px] px-3.5 rounded-lg border text-xs font-medium cursor-pointer whitespace-nowrap ${
-            stickyThrottle
-              ? 'bg-amber-500/20 border-amber-400 text-amber-200'
-              : 'bg-slate-900 border-slate-700 text-slate-300'
-          }`}
-        >
-          {stickyThrottle ? 'Acelerador Fixo (Manual)' : 'Acelerador Auto-Centro (GPS)'}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setGyroEnabled((v) => !v)}
-          className={`min-h-[40px] px-3.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-            gyroEnabled
-              ? 'bg-sky-500/20 border-sky-400 text-sky-200'
-              : 'bg-slate-900 border-slate-700 text-slate-300'
-          }`}
-        >
-          <Compass className="w-4 h-4" />
-          {gyroEnabled ? 'Giroscópio Ligado' : 'Giroscópio'}
-        </button>
       </div>
     </div>
   );

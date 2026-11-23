@@ -68,6 +68,8 @@ export interface DroneTelemetry {
   rollDeg: number;
   batteryPct: number;
   armed: boolean;
+  armingProgress: number;
+  awaitingStickRelease: boolean;
   onGround: boolean;
   crashed: boolean;
   flightMode: FlightMode;

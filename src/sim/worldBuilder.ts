@@ -13,7 +13,8 @@ export interface GateVisual {
 
 export interface WorldHandles {
   turbineRotors: THREE.Group[];
-  windsockCone: THREE.Mesh;
+  windsockSwivel: THREE.Group;
+  windsockCone: THREE.Group;
   towerBeaconMat: THREE.MeshStandardMaterial;
   hoverZoneMesh: THREE.Mesh;
   landingBeaconMesh: THREE.Mesh;
@@ -320,24 +321,148 @@ export function buildTrainingWorld(
     scene.add(dash);
   }
 
-  // 6. Windsock Pole beside Main Helipad
+  // 6. Aviation Windsock (Biruta) beside Main Helipad
   const windsockGroup = new THREE.Group();
   windsockGroup.position.set(7.5, groundHeightAt(7.5, -2), -2);
-  const poleMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.35, metalness: 0.75 });
-  const wsPole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 4.6, 12), poleMat);
-  wsPole.position.y = 2.3;
+
+  const concreteBaseMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.9, metalness: 0.05 });
+  const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.42, metalness: 0.65 });
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.35, metalness: 0.55 });
+  const safetyOrangeMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.48, metalness: 0.1 });
+
+  // Concrete anchor footing seated flush on terrain
+  const wsFooting = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.16, 16), concreteBaseMat);
+  wsFooting.position.y = 0.08;
+  wsFooting.receiveShadow = true;
+  wsFooting.castShadow = true;
+  windsockGroup.add(wsFooting);
+
+  // Steel flange collar
+  const wsFlange = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.08, 12), darkMetalMat);
+  wsFlange.position.y = 0.2;
+  wsFlange.castShadow = true;
+  windsockGroup.add(wsFlange);
+
+  // Main tapered steel mast
+  const wsPole = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.068, 4.65, 16), poleMat);
+  wsPole.position.y = 2.52;
   wsPole.castShadow = true;
   windsockGroup.add(wsPole);
 
-  const coneGeo = new THREE.ConeGeometry(0.32, 1.45, 12, 1, true);
-  coneGeo.rotateZ(-Math.PI / 2);
-  coneGeo.translate(0.75, 0, 0);
-  const windsockCone = new THREE.Mesh(
-    coneGeo,
-    new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.65, side: THREE.DoubleSide })
-  );
-  windsockCone.position.set(0, 4.35, 0);
-  windsockGroup.add(windsockCone);
+  // High-visibility safety band near top of mast
+  const wsSafetyBand = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.052, 0.22, 16), safetyOrangeMat);
+  wsSafetyBand.position.y = 4.32;
+  windsockGroup.add(wsSafetyBand);
+
+  // Rounded pole cap finial
+  const wsFinial = new THREE.Mesh(new THREE.SphereGeometry(0.056, 12, 8), darkMetalMat);
+  wsFinial.position.y = 4.86;
+  windsockGroup.add(wsFinial);
+
+  // Rotating wind-vane swivel collar at top of mast
+  const windsockSwivel = new THREE.Group();
+  windsockSwivel.position.set(0, 4.68, 0);
+  windsockGroup.add(windsockSwivel);
+
+  const swivelCollar = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.062, 0.13, 16), darkMetalMat);
+  windsockSwivel.add(swivelCollar);
+
+  // Horizontal standoff boom arm (keeps windsock ring completely clear of the mast)
+  const boomGeo = new THREE.CylinderGeometry(0.017, 0.021, 0.38, 10);
+  boomGeo.rotateZ(-Math.PI / 2);
+  const boomArm = new THREE.Mesh(boomGeo, darkMetalMat);
+  boomArm.position.set(0.22, 0, 0);
+  windsockSwivel.add(boomArm);
+
+  // Upper diagonal brace strut connecting mast top to standoff boom cleanly
+  const braceStart = new THREE.Vector3(0.04, 0.12, 0);
+  const braceEnd = new THREE.Vector3(0.28, 0, 0);
+  const braceVec = braceEnd.clone().sub(braceStart);
+  const braceGeo = new THREE.CylinderGeometry(0.011, 0.011, braceVec.length(), 8);
+  const braceArm = new THREE.Mesh(braceGeo, darkMetalMat);
+  braceArm.position.copy(braceStart).add(braceEnd).multiplyScalar(0.5);
+  braceArm.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), braceVec.normalize());
+  windsockSwivel.add(braceArm);
+
+  // Gimbal pivot hub at the tip of the standoff arm
+  const pivotHub = new THREE.Mesh(new THREE.SphereGeometry(0.026, 10, 8), darkMetalMat);
+  pivotHub.position.set(0.41, 0, 0);
+  windsockSwivel.add(pivotHub);
+
+  // Articulated windsock assembly (pivots cleanly around gimbal hub at x = 0.41)
+  const windsockCone = new THREE.Group();
+  windsockCone.position.set(0.41, 0, 0);
+  windsockSwivel.add(windsockCone);
+
+  // 3 steel bridle spreader wires from gimbal hub to metal throat hoop
+  const throatX = 0.15;
+  const throatRadius = 0.27;
+  for (let i = 0; i < 3; i++) {
+    const a = (i * Math.PI * 2) / 3;
+    const ty = Math.cos(a) * throatRadius;
+    const tz = Math.sin(a) * throatRadius;
+    const targetVec = new THREE.Vector3(throatX, ty, tz);
+    const wireLen = targetVec.length();
+    const wireGeo = new THREE.CylinderGeometry(0.007, 0.007, wireLen, 6);
+    const wire = new THREE.Mesh(wireGeo, darkMetalMat);
+    wire.position.copy(targetVec).multiplyScalar(0.5);
+    wire.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), targetVec.clone().normalize());
+    windsockCone.add(wire);
+  }
+
+  // Steel throat hoop keeping the windsock mouth circular
+  const hoopGeo = new THREE.TorusGeometry(throatRadius, 0.013, 8, 24);
+  hoopGeo.rotateY(Math.PI / 2);
+  const throatHoop = new THREE.Mesh(hoopGeo, darkMetalMat);
+  throatHoop.position.set(throatX, 0, 0);
+  throatHoop.castShadow = true;
+  windsockCone.add(throatHoop);
+
+  // Striped high-visibility aviation fabric sleeve texture (Orange / White / Orange / White / Orange)
+  const wsCanvas = document.createElement('canvas');
+  wsCanvas.width = 512;
+  wsCanvas.height = 256;
+  const wsCtx = wsCanvas.getContext('2d')!;
+  const bandColors = ['#ea580c', '#f8fafc', '#ea580c', '#f8fafc', '#ea580c'];
+  const bandH = wsCanvas.height / bandColors.length;
+  bandColors.forEach((col, idx) => {
+    wsCtx.fillStyle = col;
+    wsCtx.fillRect(0, idx * bandH, wsCanvas.width, bandH + 1);
+  });
+  // Subtle woven ripstop grid + stitched seam lines between bands
+  wsCtx.fillStyle = 'rgba(15, 23, 42, 0.05)';
+  for (let x = 0; x < wsCanvas.width; x += 16) {
+    wsCtx.fillRect(x, 0, 1, wsCanvas.height);
+  }
+  wsCtx.fillStyle = 'rgba(15, 23, 42, 0.16)';
+  for (let i = 1; i < bandColors.length; i++) {
+    wsCtx.fillRect(0, i * bandH - 1.5, wsCanvas.width, 3);
+  }
+  // Reinforced dark hem trim at throat & tail edges
+  wsCtx.fillStyle = 'rgba(15, 23, 42, 0.28)';
+  wsCtx.fillRect(0, 0, wsCanvas.width, 6);
+  wsCtx.fillRect(0, wsCanvas.height - 6, wsCanvas.width, 6);
+
+  const windsockTex = new THREE.CanvasTexture(wsCanvas);
+  windsockTex.colorSpace = THREE.SRGBColorSpace;
+  windsockTex.anisotropy = maxAniso;
+
+  // Open-ended tapered hollow fabric cylinder attached cleanly onto the throat hoop
+  const sockLen = 1.65;
+  const sockGeo = new THREE.CylinderGeometry(0.105, throatRadius, sockLen, 24, 4, true);
+  sockGeo.rotateZ(-Math.PI / 2);
+  sockGeo.translate(throatX + sockLen * 0.5, 0, 0);
+  const sockMat = new THREE.MeshStandardMaterial({
+    map: windsockTex,
+    color: 0xffffff,
+    roughness: 0.72,
+    metalness: 0.02,
+    side: THREE.DoubleSide,
+  });
+  const sockMesh = new THREE.Mesh(sockGeo, sockMat);
+  sockMesh.castShadow = true;
+  windsockCone.add(sockMesh);
+
   scene.add(windsockGroup);
 
   // 7. Elevated Precision Landing Platform (NE)
@@ -800,6 +925,7 @@ export function buildTrainingWorld(
 
   return {
     turbineRotors,
+    windsockSwivel,
     windsockCone,
     towerBeaconMat,
     hoverZoneMesh,
@@ -820,6 +946,9 @@ export function buildTrainingWorld(
       Object.values(structureMaterials).forEach((m) => m.dispose());
       mainPadTex.dispose();
       elevPadTex.dispose();
+      windsockTex.dispose();
+      sockGeo.dispose();
+      sockMat.dispose();
       trunkGeo.dispose();
       foliageGeo.dispose();
       rockGeo.dispose();

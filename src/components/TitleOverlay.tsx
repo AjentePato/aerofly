@@ -343,6 +343,8 @@ export function TitleOverlay({
           className="text-xs text-slate-200 flex flex-wrap items-center gap-x-2.5 gap-y-1"
           style={{ textShadow: '0 1px 3px rgba(0, 0, 0, 0.9)' }}
         >
+          <span>V Ligar Drone</span>
+          <span aria-hidden="true">·</span>
           <span>Espaço / Shift Subir e Descer</span>
           <span aria-hidden="true">·</span>
           <span>Q / E Girar</span>

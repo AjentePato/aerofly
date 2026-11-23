@@ -26,6 +26,44 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: 'V1.6.1',
+    title: 'Melhorias no Drone',
+    summary:
+      'Correção no comportamento do drone no solo para impedir inclinações, giros ou deslizes enquanto estiver apoiado em qualquer superfície.',
+    kind: 'fix',
+    changes: [
+      {
+        category: 'Correção',
+        text: 'Invalidados os comandos de movimento lateral, inclinação e giro enquanto o drone estiver apoiado no chão, heliponto ou cima de estruturas.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'Enquanto estiver em uma superfície, apenas o comando de subir (Espaço ou stick esquerdo para cima) funciona para uma decolagem reta e estável.',
+      },
+    ],
+  },
+  {
+    version: 'V1.6',
+    title: 'Partida dos Motores ao Iniciar a Fase',
+    summary:
+      'Agora o drone começa desligado no heliponto sempre que uma fase inicia ou é reiniciada, deixando a decolagem mais realista.',
+    kind: 'feature',
+    changes: [
+      {
+        category: 'Novo',
+        text: 'Ao começar ou reiniciar qualquer fase, as hélices ficam paradas até você ligar o drone manualmente.',
+      },
+      {
+        category: 'Novo',
+        text: 'Para ligar os motores, segure a tecla V no teclado ou coloque os dois sticks do controle para baixo e para dentro.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'Trava de segurança pós-partida: ao ligar pelo controle, o drone aguarda você soltar os sticks antes de se mover para não girar nem sair do lugar sozinho, e o cronômetro só começa após ligar.',
+      },
+    ],
+  },
+  {
     version: 'V1.5',
     title: 'Troca de Textura e Novos Visuais de Drone',
     summary:

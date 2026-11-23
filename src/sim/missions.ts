@@ -149,9 +149,10 @@ export function evaluateMissionStep(
   }
 
   const mission = getMissionById(prev.missionId);
+  const timerRunning = drone.armed || prev.elapsedSec > 0;
   const next: MissionProgress = {
     ...prev,
-    elapsedSec: prev.elapsedSec + dt,
+    elapsedSec: timerRunning ? prev.elapsedSec + dt : 0,
   };
 
   if (drone.crashed) {
