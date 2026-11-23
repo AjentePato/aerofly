@@ -2,6 +2,8 @@ export type FlightMode = 'normal' | 'sport';
 
 export type CameraMode = 'chase' | 'fpv';
 
+export type DroneSkinId = 'default' | 'dji_lito_1' | 'fpv_freestyle';
+
 export type GamePhase = 'title' | 'playing' | 'paused' | 'gameover';
 
 export type MissionId =

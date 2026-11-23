@@ -22,6 +22,7 @@ import { createCrashEffects } from '../sim/crashEffects';
 import type {
   CameraMode,
   DronePhysicsState,
+  DroneSkinId,
   DroneTelemetry,
   FlightMode,
   GamePhase,
@@ -35,6 +36,8 @@ export interface SimBridgeProps {
   missionId: MissionId;
   flightMode: FlightMode;
   cameraMode: CameraMode;
+  droneSkin: DroneSkinId;
+  showcaseDrone?: boolean;
   windEnabled: boolean;
   muted: boolean;
   remoteStickRef: React.MutableRefObject<StickInput>;
@@ -54,6 +57,7 @@ export interface SimBridgeProps {
 // Pre-allocated math helpers outside the 60Hz loop (zero GC)
 const _camTargetPos = new THREE.Vector3();
 const _camDesiredPos = new THREE.Vector3();
+const _camRightDir = new THREE.Vector3();
 const _forwardDir = new THREE.Vector3();
 const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _fpvWorldPos = new THREE.Vector3();
@@ -106,8 +110,10 @@ export function DroneCanvas(props: SimBridgeProps) {
       1800
     );
 
+    const maxAniso = isSoftwareGl ? 1 : Math.min(8, renderer.capabilities.getMaxAnisotropy());
     const world = buildTrainingWorld(scene, renderer, isSoftwareGl);
-    const droneRig = createDroneMesh();
+    let activeDroneSkin: DroneSkinId = propsRef.current.droneSkin;
+    let droneRig = createDroneMesh(activeDroneSkin, maxAniso);
     scene.add(droneRig.root);
     scene.add(droneRig.contactShadow);
 
@@ -349,26 +355,80 @@ export function DroneCanvas(props: SimBridgeProps) {
       emitGamepadIfChanged(gpSample.status);
       let activeSticks: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
 
+      // Live swap drone model/texture without resetting flight or tearing down WebGL
+      if (cur.droneSkin !== activeDroneSkin) {
+        const prevPos = droneRig.root.position.clone();
+        const prevQuat = droneRig.root.quaternion.clone();
+        const prevVis = droneRig.root.visible;
+        const prevPropVis = droneRig.propellers.map((p) => p.visible);
+        scene.remove(droneRig.root);
+        scene.remove(droneRig.contactShadow);
+        droneRig.dispose();
+
+        activeDroneSkin = cur.droneSkin;
+        droneRig = createDroneMesh(activeDroneSkin, maxAniso);
+        droneRig.root.position.copy(prevPos);
+        droneRig.root.quaternion.copy(prevQuat);
+        droneRig.root.visible = prevVis;
+        droneRig.propellers.forEach((p, idx) => {
+          p.visible = prevPropVis[idx] ?? true;
+        });
+        if (crashTumble.active) {
+          droneRig.frontLedMat.emissive.setHex(0xef4444);
+          droneRig.rearLedMat.emissive.setHex(0xef4444);
+        }
+        scene.add(droneRig.root);
+        scene.add(droneRig.contactShadow);
+      }
+
       if (cur.phase === 'title') {
         // Title screen: Live orbital camera tour around the sunlit airfield & hovering drone
-        const tourAngle = elapsed * 0.18;
+        const tourAngle = elapsed * (cur.showcaseDrone ? 0.36 : 0.18);
+        const hoverY = 3.2 + Math.sin(elapsed * 1.6) * (cur.showcaseDrone ? 0.08 : 0.22);
         droneRig.root.visible = true;
-        droneRig.root.position.set(0, 3.2 + Math.sin(elapsed * 1.6) * 0.22, 0);
-        droneRig.root.rotation.set(0.05 * Math.sin(elapsed), tourAngle * 0.4, 0.04 * Math.cos(elapsed));
+        droneRig.root.position.set(0, hoverY, 0);
+        droneRig.root.rotation.set(
+          cur.showcaseDrone ? 0.03 * Math.sin(elapsed) : 0.05 * Math.sin(elapsed),
+          cur.showcaseDrone ? tourAngle * 0.55 : tourAngle * 0.4,
+          cur.showcaseDrone ? 0.025 * Math.cos(elapsed) : 0.04 * Math.cos(elapsed)
+        );
         droneRig.contactShadow.position.set(0, surfaceHeightAt(0, 0, 1) + 0.02, 0);
         droneRig.contactShadow.scale.setScalar(0.65);
 
-        propAngle += dt * 42;
+        propAngle += dt * (cur.showcaseDrone ? 18 : 42);
         droneRig.propellers.forEach((p, idx) => {
           p.rotation.y = propAngle * (idx % 2 === 0 ? 1 : -1);
-          droneRig.propBlurDiscs[idx].visible = true;
+          droneRig.propBlurDiscs[idx].visible = !cur.showcaseDrone;
         });
 
-        _camDesiredPos.set(Math.sin(tourAngle) * 9.5, 5.2 + Math.sin(elapsed * 0.4) * 0.8, Math.cos(tourAngle) * 9.5);
-        camera.position.lerp(_camDesiredPos, 1 - Math.exp(-3 * dt));
-        camera.lookAt(0, 2.8, -10);
-        camera.fov = 58;
-        camera.updateProjectionMatrix();
+        if (cur.showcaseDrone) {
+          // Close-up studio showcase starting from signature front-3/4 hero angle on right-hand viewport
+          const showcaseAngle = Math.PI * 0.78 + elapsed * 0.34;
+          const orbitRadius = 1.56;
+          _camDesiredPos.set(
+            Math.sin(showcaseAngle) * orbitRadius,
+            hoverY + 0.25,
+            Math.cos(showcaseAngle) * orbitRadius
+          );
+          camera.position.lerp(_camDesiredPos, 1 - Math.exp(-6.5 * dt));
+
+          _forwardDir.set(-Math.sin(showcaseAngle), 0, -Math.cos(showcaseAngle));
+          _camRightDir.set(Math.cos(showcaseAngle), 0, -Math.sin(showcaseAngle));
+          _camTargetPos.set(0, hoverY - 0.04, 0).addScaledVector(_camRightDir, -0.28);
+          camera.lookAt(_camTargetPos);
+          if (Math.abs(camera.fov - 44) > 0.1) {
+            camera.fov += (44 - camera.fov) * (1 - Math.exp(-6.5 * dt));
+            camera.updateProjectionMatrix();
+          }
+        } else {
+          _camDesiredPos.set(Math.sin(tourAngle) * 9.5, 5.2 + Math.sin(elapsed * 0.4) * 0.8, Math.cos(tourAngle) * 9.5);
+          camera.position.lerp(_camDesiredPos, 1 - Math.exp(-4.5 * dt));
+          camera.lookAt(0, 2.8, -10);
+          if (Math.abs(camera.fov - 58) > 0.1) {
+            camera.fov += (58 - camera.fov) * (1 - Math.exp(-4.5 * dt));
+            camera.updateProjectionMatrix();
+          }
+        }
         audio.updateMotors(0, false, 0);
       } else if (cur.phase === 'playing') {
         if (!crashTumble.active) {
@@ -617,6 +677,7 @@ export function DroneCanvas(props: SimBridgeProps) {
       window.removeEventListener('resize', onResize);
       audio.dispose();
       crashEffects.dispose();
+      droneRig.dispose();
       world.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === container) {

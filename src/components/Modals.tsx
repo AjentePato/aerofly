@@ -1,11 +1,14 @@
-import { Play, RotateCcw, Smartphone, Wind, Award, AlertTriangle, Home, Gamepad2 } from 'lucide-react';
+import { useState } from 'react';
+import { Play, RotateCcw, Smartphone, Wind, Award, AlertTriangle, Home, Gamepad2, Palette, SlidersHorizontal } from 'lucide-react';
 import { MISSIONS, getMissionById } from '../sim/missions';
-import type { CameraMode, DronePhysicsState, FlightMode, MissionId, MissionProgress } from '../sim/types';
+import { DroneSkinSelector } from './DroneSkinSelector';
+import type { CameraMode, DronePhysicsState, DroneSkinId, FlightMode, MissionId, MissionProgress } from '../sim/types';
 
 interface PauseModalProps {
   missionId: MissionId;
   flightMode: FlightMode;
   cameraMode: CameraMode;
+  droneSkin: DroneSkinId;
   windEnabled: boolean;
   controllerConnected: boolean;
   gamepadConnected?: boolean;
@@ -16,6 +19,7 @@ interface PauseModalProps {
   onSelectMission: (id: MissionId) => void;
   onSelectFlightMode: (mode: FlightMode) => void;
   onSelectCameraMode: (cam: CameraMode) => void;
+  onSelectDroneSkin: (skin: DroneSkinId) => void;
   onToggleWind: () => void;
   onOpenPairing: () => void;
 }
@@ -24,6 +28,7 @@ export function PauseModal({
   missionId,
   flightMode,
   cameraMode,
+  droneSkin,
   windEnabled,
   controllerConnected,
   gamepadConnected = false,
@@ -34,9 +39,12 @@ export function PauseModal({
   onSelectMission,
   onSelectFlightMode,
   onSelectCameraMode,
+  onSelectDroneSkin,
   onToggleWind,
   onOpenPairing,
 }: PauseModalProps) {
+  const [pauseTab, setPauseTab] = useState<'settings' | 'texture'>('settings');
+
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center p-4"
@@ -46,7 +54,7 @@ export function PauseModal({
       aria-labelledby="pause-title"
     >
       <div
-        className="w-full max-w-lg rounded-xl border border-slate-700 p-6 text-slate-100 flex flex-col gap-5"
+        className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-xl border border-slate-700 p-6 text-slate-100 flex flex-col gap-4"
         style={{ backgroundColor: 'rgba(12, 18, 32, 0.96)' }}
       >
         <div className="flex items-center justify-between gap-3">
@@ -55,7 +63,7 @@ export function PauseModal({
               Simulação Pausada
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Ajuste o modo de voo, câmera ou missão de treinamento
+              Ajuste o modo de voo, câmera, textura ou missão de treinamento
             </p>
           </div>
           <button
@@ -68,103 +76,154 @@ export function PauseModal({
           </button>
         </div>
 
-        {gamepadConnected && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-xs text-emerald-200">
-            <Gamepad2 className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
-            <span>
-              Controle conectado ({gamepadLabel || 'Xbox / DS4'}) · Stick Esq: Acel/Yaw · Stick Dir: Pitch/Roll
-            </span>
+        {/* Pause Modal Tabs: Voo & Missão | Textura do Drone */}
+        <div
+          className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-900 border border-slate-700/80"
+          role="tablist"
+          aria-label="Abas do menu de pausa"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={pauseTab === 'settings'}
+            onClick={() => setPauseTab('settings')}
+            className={`px-3 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+              pauseTab === 'settings'
+                ? 'bg-amber-500 text-slate-950'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" aria-hidden="true" />
+            Voo & Missão
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={pauseTab === 'texture'}
+            onClick={() => setPauseTab('texture')}
+            className={`px-3 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+              pauseTab === 'texture'
+                ? 'bg-amber-500 text-slate-950'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800'
+            }`}
+          >
+            <Palette className="w-3.5 h-3.5" aria-hidden="true" />
+            Textura do Drone
+          </button>
+        </div>
+
+        {pauseTab === 'settings' ? (
+          <>
+            {gamepadConnected && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-xs text-emerald-200">
+                <Gamepad2 className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
+                <span>
+                  Controle conectado ({gamepadLabel || 'Xbox / DS4'}) · Stick Esq: Acel/Yaw · Stick Dir: Pitch/Roll
+                </span>
+              </div>
+            )}
+
+            {/* Mission Switch */}
+            <div>
+              <label htmlFor="pause-mission-select" className="block text-xs font-medium text-slate-300 mb-1.5">
+                Missão Ativa
+              </label>
+              <select
+                id="pause-mission-select"
+                value={missionId}
+                onChange={(e) => onSelectMission(e.target.value as MissionId)}
+                className="w-full px-3 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
+              >
+                {MISSIONS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.code}. {m.title} — {m.subtitle}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Flight Mode & Camera */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <span className="block text-xs font-medium text-slate-300 mb-1.5">Modo de Voo</span>
+                <div className="grid grid-cols-2 gap-1">
+                  {(
+                    [
+                      ['normal', 'GPS'],
+                      ['sport', 'Sport'],
+                    ] as Array<[FlightMode, string]>
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => onSelectFlightMode(id)}
+                      className={`py-2 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
+                        flightMode === id
+                          ? 'bg-amber-500 text-slate-950 border-amber-400'
+                          : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <span className="block text-xs font-medium text-slate-300 mb-1.5">Câmera</span>
+                <div className="grid grid-cols-2 gap-1">
+                  {(
+                    [
+                      ['chase', 'Chase'],
+                      ['fpv', 'FPV'],
+                    ] as Array<[CameraMode, string]>
+                  ).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => onSelectCameraMode(id)}
+                      className={`py-2 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
+                        cameraMode === id
+                          ? 'bg-sky-500 text-slate-950 border-sky-400'
+                          : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Wind Toggle */}
+            <button
+              type="button"
+              onClick={onToggleWind}
+              className={`w-full px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
+                windEnabled
+                  ? 'bg-sky-500/15 border-sky-400 text-sky-200'
+                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Wind className="w-4 h-4" />
+                Simulação de Vento Lateral
+              </span>
+              <span className="font-mono">{windEnabled ? 'ATIVADO' : 'DESLIGADO'}</span>
+            </button>
+          </>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <DroneSkinSelector
+              selectedSkin={droneSkin}
+              onSelectSkin={onSelectDroneSkin}
+              compact
+            />
+            <p className="text-xs text-slate-400">
+              A troca é aplicada instantaneamente ao drone em voo sem reiniciar sua missão.
+            </p>
           </div>
         )}
-
-        {/* Mission Switch */}
-        <div>
-          <label htmlFor="pause-mission-select" className="block text-xs font-medium text-slate-300 mb-1.5">
-            Missão Ativa
-          </label>
-          <select
-            id="pause-mission-select"
-            value={missionId}
-            onChange={(e) => onSelectMission(e.target.value as MissionId)}
-            className="w-full px-3 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
-          >
-            {MISSIONS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.code}. {m.title} — {m.subtitle}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Flight Mode & Camera */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <span className="block text-xs font-medium text-slate-300 mb-1.5">Modo de Voo</span>
-            <div className="grid grid-cols-2 gap-1">
-              {(
-                [
-                  ['normal', 'GPS'],
-                  ['sport', 'Sport'],
-                ] as Array<[FlightMode, string]>
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => onSelectFlightMode(id)}
-                  className={`py-2 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
-                    flightMode === id
-                      ? 'bg-amber-500 text-slate-950 border-amber-400'
-                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <span className="block text-xs font-medium text-slate-300 mb-1.5">Câmera</span>
-            <div className="grid grid-cols-2 gap-1">
-              {(
-                [
-                  ['chase', 'Chase'],
-                  ['fpv', 'FPV'],
-                ] as Array<[CameraMode, string]>
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => onSelectCameraMode(id)}
-                  className={`py-2 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
-                    cameraMode === id
-                      ? 'bg-sky-500 text-slate-950 border-sky-400'
-                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Wind Toggle */}
-        <button
-          type="button"
-          onClick={onToggleWind}
-          className={`w-full px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
-            windEnabled
-              ? 'bg-sky-500/15 border-sky-400 text-sky-200'
-              : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
-          }`}
-        >
-          <span className="flex items-center gap-2">
-            <Wind className="w-4 h-4" />
-            Simulação de Vento Lateral
-          </span>
-          <span className="font-mono">{windEnabled ? 'ATIVADO' : 'DESLIGADO'}</span>
-        </button>
 
         {/* Modal Actions */}
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">

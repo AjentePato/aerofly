@@ -29,6 +29,7 @@ import {
   isPatchVersion,
   isValidVersionFormat,
 } from './changelog';
+import { DRONE_SKINS, getDroneSkinOption, isValidDroneSkin } from './droneSkins';
 import {
   STICK_PACKET_BYTES,
   decodeBinaryStick,
@@ -583,6 +584,22 @@ test('no decorative rock or tree overlaps any building, barn, house, or structur
       );
     }
   }
+});
+
+test('drone skins catalog includes default, Drone Branco Moderno, and Drone FPV Freestyle with valid lookup & validation', () => {
+  assert.equal(DRONE_SKINS.length, 3);
+  assert.equal(DRONE_SKINS[0].id, 'default');
+  assert.equal(DRONE_SKINS[1].id, 'dji_lito_1');
+  assert.equal(DRONE_SKINS[2].id, 'fpv_freestyle');
+
+  assert.equal(isValidDroneSkin('default'), true);
+  assert.equal(isValidDroneSkin('dji_lito_1'), true);
+  assert.equal(isValidDroneSkin('fpv_freestyle'), true);
+  assert.equal(isValidDroneSkin('unknown_skin'), false);
+
+  assert.equal(getDroneSkinOption('dji_lito_1').name, 'Drone Branco Moderno');
+  assert.equal(getDroneSkinOption('fpv_freestyle').name, 'Drone FPV Freestyle');
+  assert.equal(getDroneSkinOption('default').name, 'Drone Padrão');
 });
 
 

@@ -1,12 +1,15 @@
-import { useEffect } from 'react';
-import { Gamepad2, Smartphone, Play, Sparkles, Wind } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Gamepad2, Palette, Play, Smartphone, Sparkles, Target, Wind } from 'lucide-react';
 import { MISSIONS } from '../sim/missions';
 import { GAME_VERSION } from '../sim/changelog';
-import type { FlightMode, MissionId } from '../sim/types';
+import { getDroneSkinOption } from '../sim/droneSkins';
+import { DroneSkinSelector } from './DroneSkinSelector';
+import type { DroneSkinId, FlightMode, MissionId } from '../sim/types';
 
 interface TitleOverlayProps {
   selectedMission: MissionId;
   flightMode: FlightMode;
+  droneSkin: DroneSkinId;
   windEnabled: boolean;
   controllerConnected: boolean;
   gamepadConnected: boolean;
@@ -14,6 +17,8 @@ interface TitleOverlayProps {
   modalOpen?: boolean;
   onSelectMission: (id: MissionId) => void;
   onSelectFlightMode: (mode: FlightMode) => void;
+  onSelectDroneSkin: (skin: DroneSkinId) => void;
+  onShowcaseChange?: (active: boolean) => void;
   onToggleWind: () => void;
   onStartFlight: () => void;
   onOpenPairing: () => void;
@@ -28,6 +33,7 @@ const MODE_OPTIONS: Array<{ id: FlightMode; label: string; desc: string }> = [
 export function TitleOverlay({
   selectedMission,
   flightMode,
+  droneSkin,
   windEnabled,
   controllerConnected,
   gamepadConnected,
@@ -35,11 +41,22 @@ export function TitleOverlay({
   modalOpen = false,
   onSelectMission,
   onSelectFlightMode,
+  onSelectDroneSkin,
+  onShowcaseChange,
   onToggleWind,
   onStartFlight,
   onOpenPairing,
   onOpenChangelog,
 }: TitleOverlayProps) {
+  const [activeTab, setActiveTab] = useState<'missions' | 'texture'>('missions');
+
+  useEffect(() => {
+    onShowcaseChange?.(activeTab === 'texture');
+    return () => {
+      onShowcaseChange?.(false);
+    };
+  }, [activeTab, onShowcaseChange]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (modalOpen) return;
@@ -53,6 +70,8 @@ export function TitleOverlay({
     return () => window.removeEventListener('keydown', onKey);
   }, [modalOpen, onStartFlight]);
 
+  const activeSkinOption = getDroneSkinOption(droneSkin);
+
   return (
     <div className="fixed inset-0 z-20 flex flex-col justify-between p-6 md:p-10 pointer-events-none">
       {/* Subtle left scrim for guaranteed WCAG AA contrast over sunlit 3D world */}
@@ -65,7 +84,7 @@ export function TitleOverlay({
       />
 
       {/* Main Left-Third Lockup */}
-      <div className="relative z-10 max-w-[460px] max-h-[calc(100vh-72px)] overflow-y-auto pr-1 flex flex-col gap-4 my-auto pointer-events-auto">
+      <div className="relative z-10 max-w-[460px] max-h-[calc(100vh-72px)] overflow-y-auto pr-1 flex flex-col gap-3.5 my-auto pointer-events-auto">
         {/* Custom Inline SVG Quadcopter Title Emblem */}
         <div className="flex items-center gap-3.5">
           <svg
@@ -104,81 +123,170 @@ export function TitleOverlay({
           Pratique decolagem, orientação espacial e curvas coordenadas antes de pilotar um drone real. Use o teclado, controle Xbox / PS4 (DS4) ou pareie seu celular como rádio controle.
         </p>
 
-        {/* Mission Selector */}
-        <div>
-          <span className="block text-xs font-medium text-slate-300 mb-2">
-            Escolha a Missão de Treinamento
-          </span>
-          <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Missões de treinamento">
-            {MISSIONS.map((m) => {
-              const active = selectedMission === m.id;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => onSelectMission(m.id)}
-                  className={`w-full text-left px-3.5 py-2 rounded-lg border transition-colors flex items-center justify-between gap-3 ${
-                    active
-                      ? 'bg-amber-500/20 border-amber-400 text-white'
-                      : 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:border-slate-500 hover:text-white'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold truncate">
-                      {m.code}. {m.title}
-                    </div>
-                    <div className="text-xs text-slate-400 truncate">{m.subtitle}</div>
-                  </div>
-                  <span className="text-xs font-mono text-amber-300 shrink-0 whitespace-nowrap">
-                    {m.recommendedMode === 'normal' ? 'GPS' : 'SPORT'}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        {/* Primary Menu Tabs: Missões & Voo | Textura do Drone */}
+        <div
+          className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-900/90 border border-slate-700/80"
+          role="tablist"
+          aria-label="Seções do menu inicial"
+        >
+          <button
+            type="button"
+            role="tab"
+            id="title-tab-missions"
+            aria-selected={activeTab === 'missions'}
+            aria-controls="title-panel-missions"
+            onClick={() => setActiveTab('missions')}
+            className={`px-3 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === 'missions'
+                ? 'bg-amber-500 text-slate-950'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+            }`}
+          >
+            <Target className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span>Missões & Voo</span>
+          </button>
 
-        {/* Flight Mode & Wind Compact Controls */}
-        <div className="flex flex-col gap-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-slate-300">Modo de Voo</span>
-            <button
-              type="button"
-              onClick={onToggleWind}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 ${
-                windEnabled
-                  ? 'bg-sky-500/20 border-sky-400 text-sky-200'
-                  : 'bg-slate-900/80 border-slate-700 text-slate-300 hover:border-slate-500'
+          <button
+            type="button"
+            role="tab"
+            id="title-tab-texture"
+            aria-selected={activeTab === 'texture'}
+            aria-controls="title-panel-texture"
+            onClick={() => setActiveTab('texture')}
+            className={`px-3 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === 'texture'
+                ? 'bg-amber-500 text-slate-950'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+            }`}
+          >
+            <Palette className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span>Textura do Drone</span>
+            <span
+              className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                activeTab === 'texture'
+                  ? 'bg-slate-950/20 text-slate-950'
+                  : 'bg-slate-800 text-amber-300'
               }`}
             >
-              <Wind className="w-3.5 h-3.5" aria-hidden="true" />
-              {windEnabled ? 'Vento Ligado' : 'Sem Vento'}
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Modo de voo">
-            {MODE_OPTIONS.map((opt) => {
-              const active = flightMode === opt.id;
-              return (
+              {droneSkin === 'dji_lito_1'
+                ? 'Moderno'
+                : droneSkin === 'fpv_freestyle'
+                  ? 'FPV'
+                  : 'Padrão'}
+            </span>
+          </button>
+        </div>
+
+        {activeTab === 'missions' ? (
+          <div
+            id="title-panel-missions"
+            role="tabpanel"
+            aria-labelledby="title-tab-missions"
+            className="flex flex-col gap-3.5"
+          >
+            {/* Mission Selector */}
+            <div>
+              <span className="block text-xs font-medium text-slate-300 mb-2">
+                Escolha a Missão de Treinamento
+              </span>
+              <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Missões de treinamento">
+                {MISSIONS.map((m) => {
+                  const active = selectedMission === m.id;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => onSelectMission(m.id)}
+                      className={`w-full text-left px-3.5 py-2 rounded-lg border transition-colors flex items-center justify-between gap-3 cursor-pointer ${
+                        active
+                          ? 'bg-amber-500/20 border-amber-400 text-white'
+                          : 'bg-slate-900/80 border-slate-700/80 text-slate-300 hover:border-slate-500 hover:text-white'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold truncate">
+                          {m.code}. {m.title}
+                        </div>
+                        <div className="text-xs text-slate-400 truncate">{m.subtitle}</div>
+                      </div>
+                      <span className="text-xs font-mono text-amber-300 shrink-0 whitespace-nowrap">
+                        {m.recommendedMode === 'normal' ? 'GPS' : 'SPORT'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Flight Mode & Wind Compact Controls */}
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-slate-300">Modo de Voo</span>
                 <button
-                  key={opt.id}
                   type="button"
-                  title={opt.desc}
-                  onClick={() => onSelectFlightMode(opt.id)}
-                  className={`px-2.5 py-2 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap ${
-                    active
-                      ? 'bg-slate-100 text-slate-950 border-white'
-                      : 'bg-slate-900/85 text-slate-300 border-slate-700 hover:border-slate-500'
+                  onClick={onToggleWind}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium border flex items-center gap-1.5 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    windEnabled
+                      ? 'bg-sky-500/20 border-sky-400 text-sky-200'
+                      : 'bg-slate-900/80 border-slate-700 text-slate-300 hover:border-slate-500'
                   }`}
                 >
-                  {opt.label}
+                  <Wind className="w-3.5 h-3.5" aria-hidden="true" />
+                  {windEnabled ? 'Vento Ligado' : 'Sem Vento'}
                 </button>
-              );
-            })}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Modo de voo">
+                {MODE_OPTIONS.map((opt) => {
+                  const active = flightMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      title={opt.desc}
+                      onClick={() => onSelectFlightMode(opt.id)}
+                      className={`px-2.5 py-2 rounded-lg border text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+                        active
+                          ? 'bg-slate-100 text-slate-950 border-white'
+                          : 'bg-slate-900/85 text-slate-300 border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-slate-400">
+                {MODE_OPTIONS.find((o) => o.id === flightMode)?.desc}
+              </p>
+            </div>
           </div>
-          <p className="text-xs text-slate-400">
-            {MODE_OPTIONS.find((o) => o.id === flightMode)?.desc}
-          </p>
-        </div>
+        ) : (
+          <div
+            id="title-panel-texture"
+            role="tabpanel"
+            aria-labelledby="title-tab-texture"
+            className="flex flex-col gap-2.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-slate-300">
+                Escolha o Visual do Drone
+              </span>
+              <span className="text-[11px] font-mono text-amber-300">
+                Atual: {activeSkinOption.name}
+              </span>
+            </div>
+
+            <DroneSkinSelector
+              selectedSkin={droneSkin}
+              onSelectSkin={onSelectDroneSkin}
+              compact
+            />
+
+            <p className="text-xs text-slate-400 leading-snug">
+              A prévia 3D ao lado atualiza na hora para você conferir os detalhes antes de decolar.
+            </p>
+          </div>
+        )}
 
         {/* Primary & Mobile Controller Actions (<= 2 main buttons) */}
         <div className="flex flex-wrap items-center gap-3 pt-1">

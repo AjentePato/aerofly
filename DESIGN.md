@@ -16,10 +16,11 @@ Simulador 3D de voo e treinamento para drones quadricópteros construído com Re
 - `src/sim/stickProtocol.ts`: Codificação/decodificação binária compacta de 9 bytes (`0x01 + 4x Int16LE`), detecção de variação/retorno imediato ao centro e seleção de transporte (`webrtc` / `ws`).
 - `src/sim/webrtcConfig.ts`: Configuração ICE/STUN e tipos de sinalização para canal direto P2P (`RTCDataChannel` não ordenado e sem retransmissão).
 - `src/sim/worldBuilder.ts`: Construção da cena Three.js (terreno otimizado, lago, pistas, estruturas com raio de culling para raycast, vegetação, iluminação e visuais de missão).
-- `src/sim/droneMesh.ts`: Rig 3D do drone quadricóptero, hélices, gimbal estabilizado e sombra de contato.
+- `src/sim/droneSkins.ts`: Catálogo e persistência local (`default`, `dji_lito_1` e `fpv_freestyle`) dos visuais/texturas selecionáveis do drone.
+- `src/sim/droneMesh.ts`, `src/sim/droneLito1Mesh.ts` & `src/sim/droneFpvMesh.ts`: Rigs 3D completos do Drone Padrão, do Drone Branco Moderno e do Drone FPV Freestyle (chassi aberto em carbono, motores vermelhos, hélices azuis de 3 pás, câmera dupla e bateria no topo).
 - `src/sim/audio.ts`: Síntese procedural de motores, portões e colisões via Web Audio API.
-- `src/components/DroneCanvas.tsx`: Loop WebGL/Three.js (`requestAnimationFrame` / `afterDraw` em software GL), amostragem unificada de teclado + celular + gamepad físico e câmeras (`chase`, `fpv`).
-- `src/components/TitleOverlay.tsx`: Tela inicial com seleção de missões, modo de voo, vento, pareamento celular, indicador discreto de versão ao lado do título e botão "Novidades!" no canto inferior direito.
+- `src/components/DroneCanvas.tsx`: Loop WebGL/Three.js (`requestAnimationFrame` / `afterDraw` em software GL), amostragem unificada de teclado + celular + gamepad físico, troca ao vivo de modelo do drone e câmeras (`chase`, `fpv`).
+- `src/components/TitleOverlay.tsx` & `src/components/DroneSkinSelector.tsx`: Tela inicial com abas (`Missões & Voo` e `Textura do Drone`), prévia 3D em close-up, versão ao lado do título e botão "Novidades!" no canto inferior direito.
 - `src/components/ChangelogModal.tsx`: Modal acessível exibindo a linha do tempo detalhada de versões com filtros.
 - `src/components/FlightHUD.tsx`: HUD de voo com objetivo da missão, troca rápida de modo, câmera/som/pausa, status de controle Xbox/DS4, visualizador ao vivo dos sticks Modo 2 e barra de telemetria.
 - `src/components/Modals.tsx`: Modais de pausa (`PauseModal`) e resultado de missão (`OutcomeModal`).

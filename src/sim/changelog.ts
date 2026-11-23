@@ -26,6 +26,31 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: 'V1.5',
+    title: 'Troca de Textura e Novos Visuais de Drone',
+    summary:
+      'Nova aba para personalizar o visual do drone, estreando os modelos Drone Branco Moderno e Drone FPV Freestyle ao lado do modelo padrão.',
+    kind: 'feature',
+    changes: [
+      {
+        category: 'Novo',
+        text: 'Nova aba "Textura do Drone" no menu inicial e no menu de pausa para alternar o visual do drone com prévia 3D ao vivo.',
+      },
+      {
+        category: 'Novo',
+        text: 'Adicionado o Drone Branco Moderno, com sensores frontais duplos, câmera frontal quadrada, pernas dianteiras e hélices com pontas laranja.',
+      },
+      {
+        category: 'Novo',
+        text: 'Adicionado o Drone FPV Freestyle com chassi aberto em fibra de carbono, espaçadores roxos, motores vermelhos, hélices azuis de 3 pás, câmera dupla e bateria no topo.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'A textura escolhida fica salva automaticamente e pode ser trocada até durante o voo sem reiniciar a missão.',
+      },
+    ],
+  },
+  {
     version: 'V1.4.2',
     title: 'Remoção da Câmera Solo (LOS)',
     summary:

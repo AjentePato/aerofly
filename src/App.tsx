@@ -10,9 +10,11 @@ import { MISSIONS, createInitialMissionProgress, getMissionById } from './sim/mi
 import { readBrowserGamepad, type GamepadStatus } from './sim/gamepad';
 import { decodeBinaryStick } from './sim/stickProtocol';
 import { RTC_CONFIG, RTC_STICK_CHANNEL_OPTIONS } from './sim/webrtcConfig';
+import { loadSavedDroneSkin, saveDroneSkin } from './sim/droneSkins';
 import type {
   CameraMode,
   DronePhysicsState,
+  DroneSkinId,
   DroneTelemetry,
   FlightMode,
   GamePhase,
@@ -70,6 +72,8 @@ export default function App() {
   const [missionId, setMissionId] = useState<MissionId>('hover_takeoff');
   const [flightMode, setFlightMode] = useState<FlightMode>('normal');
   const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
+  const [droneSkin, setDroneSkin] = useState<DroneSkinId>(() => loadSavedDroneSkin());
+  const [showcaseDrone, setShowcaseDrone] = useState(false);
   const [windEnabled, setWindEnabled] = useState(false);
   const [muted, setMuted] = useState(false);
   const [resetNonce, setResetNonce] = useState(0);
@@ -112,6 +116,11 @@ export default function App() {
 
   const cycleFlightMode = useCallback(() => {
     setFlightMode((prev) => (prev === 'normal' ? 'sport' : 'normal'));
+  }, []);
+
+  const handleSelectDroneSkin = useCallback((skin: DroneSkinId) => {
+    setDroneSkin(skin);
+    saveDroneSkin(skin);
   }, []);
 
   const handleStartFlight = useCallback(() => {
@@ -505,6 +514,8 @@ export default function App() {
         missionId={missionId}
         flightMode={flightMode}
         cameraMode={cameraMode}
+        droneSkin={droneSkin}
+        showcaseDrone={phase === 'title' && showcaseDrone}
         windEnabled={windEnabled}
         muted={muted}
         remoteStickRef={remoteStickRef}
@@ -525,6 +536,7 @@ export default function App() {
         <TitleOverlay
           selectedMission={missionId}
           flightMode={flightMode}
+          droneSkin={droneSkin}
           windEnabled={windEnabled}
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
@@ -532,6 +544,8 @@ export default function App() {
           modalOpen={showPairing || showChangelog}
           onSelectMission={handleSelectMission}
           onSelectFlightMode={setFlightMode}
+          onSelectDroneSkin={handleSelectDroneSkin}
+          onShowcaseChange={setShowcaseDrone}
           onToggleWind={() => setWindEnabled((w) => !w)}
           onStartFlight={handleStartFlight}
           onOpenPairing={() => setShowPairing(true)}
@@ -562,6 +576,7 @@ export default function App() {
           missionId={missionId}
           flightMode={flightMode}
           cameraMode={cameraMode}
+          droneSkin={droneSkin}
           windEnabled={windEnabled}
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
@@ -575,6 +590,7 @@ export default function App() {
           onSelectMission={handleSelectMission}
           onSelectFlightMode={setFlightMode}
           onSelectCameraMode={setCameraMode}
+          onSelectDroneSkin={handleSelectDroneSkin}
           onToggleWind={() => setWindEnabled((w) => !w)}
           onOpenPairing={() => setShowPairing(true)}
         />
