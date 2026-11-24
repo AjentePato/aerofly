@@ -84,9 +84,30 @@ export function FloatingStickZone({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeOrigin, radiusPx]);
 
-  // Reset stick cleanly if zone unmounts mid-drag (e.g. HUD hidden or paused)
+  const resetPointer = () => {
+    if (pointerIdRef.current === null) return;
+    pointerIdRef.current = null;
+    originRef.current = null;
+    rectRef.current = null;
+    setActiveOrigin(null);
+    const releaseVal: StickVec = { x: 0, y: 0 };
+    valueRef.current = releaseVal;
+    syncVisuals(releaseVal, true);
+    onStickSampleRef.current(releaseVal, true);
+  };
+
+  // Reset stick cleanly if window loses focus, tab hides, or zone unmounts mid-drag
   useEffect(() => {
+    const onBlurOrHide = () => {
+      if (document.hidden || !document.hasFocus()) {
+        resetPointer();
+      }
+    };
+    window.addEventListener('blur', resetPointer);
+    document.addEventListener('visibilitychange', onBlurOrHide);
     return () => {
+      window.removeEventListener('blur', resetPointer);
+      document.removeEventListener('visibilitychange', onBlurOrHide);
       if (readoutTimerRef.current) {
         clearTimeout(readoutTimerRef.current);
         readoutTimerRef.current = 0;
@@ -99,6 +120,7 @@ export function FloatingStickZone({
         onStickSampleRef.current({ x: 0, y: 0 }, true);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toLocalCoords = (clientX: number, clientY: number) => {
@@ -156,15 +178,14 @@ export function FloatingStickZone({
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (pointerIdRef.current !== e.pointerId) return;
-    pointerIdRef.current = null;
-    originRef.current = null;
-    rectRef.current = null;
-    setActiveOrigin(null);
-
-    const releaseVal: StickVec = { x: 0, y: 0 };
-    valueRef.current = releaseVal;
-    syncVisuals(releaseVal, true);
-    onStickSampleRef.current(releaseVal, true);
+    try {
+      if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // Ignore release errors
+    }
+    resetPointer();
   };
 
   const isOverlay = variant === 'overlay';
@@ -177,6 +198,7 @@ export function FloatingStickZone({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
+      onLostPointerCapture={handlePointerUp}
       role="application"
       aria-label={label}
       data-testid={side === 'left' ? 'left-stick-zone' : 'right-stick-zone'}

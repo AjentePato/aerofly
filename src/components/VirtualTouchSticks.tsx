@@ -63,7 +63,7 @@ export function VirtualTouchSticks({
     <div
       data-testid="virtual-touch-sticks"
       data-touch-invisible={invisible ? 'true' : 'false'}
-      className="fixed inset-0 z-10 grid grid-cols-2 select-none"
+      className="fixed inset-0 z-10 grid grid-cols-2 select-none pointer-events-auto"
       style={{ touchAction: 'none' }}
     >
       <FloatingStickZone

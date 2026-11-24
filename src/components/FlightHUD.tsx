@@ -126,24 +126,23 @@ export function FlightHUD({
   // Clean-screen mode: hide HUD panels, reticle & telemetry while touch controls remain active and invisible
   if (hudHidden) {
     return (
-      <div className="fixed inset-0 z-20 pointer-events-none select-none p-3 sm:p-4 md:p-6 flex items-start justify-end">
-        <button
-          type="button"
-          tabIndex={-1}
-          data-testid="toggle-hud-btn"
-          onClick={(e) => {
-            e.currentTarget.blur();
-            onToggleHud();
-          }}
-          aria-label="Mostrar HUD (H)"
-          title="Mostrar HUD [H]"
-          className="pointer-events-auto min-w-[40px] min-h-[40px] px-3 rounded-lg border border-slate-700/60 text-slate-200/80 hover:text-white hover:border-amber-400 opacity-55 hover:opacity-100 flex items-center gap-1.5 text-xs font-medium transition-opacity cursor-pointer"
-          style={{ backgroundColor: 'rgba(8, 13, 24, 0.65)' }}
-        >
-          <Eye className="w-4 h-4 text-amber-400" aria-hidden="true" />
-          <span className="hidden sm:inline">HUD</span>
-        </button>
-      </div>
+      <button
+        type="button"
+        tabIndex={-1}
+        data-testid="toggle-hud-btn"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.currentTarget.blur();
+          onToggleHud();
+        }}
+        aria-label="Mostrar HUD (H)"
+        title="Mostrar HUD [H]"
+        className="fixed top-3 right-3 sm:top-4 sm:right-4 md:top-6 md:right-6 z-20 pointer-events-auto select-none min-w-[40px] min-h-[40px] px-3 rounded-lg border border-slate-700/60 text-slate-200/80 hover:text-white hover:border-amber-400 opacity-55 hover:opacity-100 flex items-center gap-1.5 text-xs font-medium transition-opacity cursor-pointer"
+        style={{ backgroundColor: 'rgba(8, 13, 24, 0.65)', touchAction: 'manipulation' }}
+      >
+        <Eye className="w-4 h-4 text-amber-400" aria-hidden="true" />
+        <span className="hidden sm:inline">HUD</span>
+      </button>
     );
   }
 
