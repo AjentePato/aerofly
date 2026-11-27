@@ -26,6 +26,69 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
+    version: 'V2.2',
+    title: 'Seletor de Gráficos (Low-Poly e Realista) e Ajustes Visuais do Cenário',
+    summary:
+      'Adicionada a opção nas Configurações para escolher entre o visual clássico Low-Poly (Antiga) e o visual Realista (Atual), além de correções na água do lago e nos reflexos do terreno.',
+    kind: 'feature',
+    changes: [
+      {
+        category: 'Novo',
+        text: 'Nova opção nas Configurações (menu inicial e pausa) para trocar os gráficos entre Low-Poly (Antiga) e Realista (Atual) a qualquer momento.',
+      },
+      {
+        category: 'Correção',
+        text: 'Corrigida a cor e o reflexo da água do lago em todo o contorno, removendo o aspecto esbranquiçado em ângulos baixos para exibir azul e verde naturais.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'Reduzido o brilho excessivo no solo e no cascalho, removida a caixa do topo das turbinas eólicas e aprimorados o topo da torre e a textura das ruínas.',
+      },
+    ],
+  },
+  {
+    version: 'V2.1',
+    title: 'Visual Realista de Terreno, Água, Vegetação, Construções e Drones',
+    summary:
+      'Reformulação gráfica completa de todo o cenário e dos modelos de drone para substituir o estilo simples por iluminação natural, superfícies detalhadas e animações realistas.',
+    kind: 'major',
+    changes: [
+      {
+        category: 'Novo',
+        text: 'Terreno mais detalhado com mistura natural entre grama, trilhas de cascalho, encostas rochosas e margem úmida ao redor do lago.',
+      },
+      {
+        category: 'Novo',
+        text: 'Lago com ondas em movimento, reflexos do céu e espuma suave na beira, além de nuvens se movendo no céu.',
+      },
+      {
+        category: 'Novo',
+        text: 'Pinheiros com copas em camadas reais que balançam com o vento, tufos de capim e rochas naturais pelo vale.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'Construções, contêineres, pista de asfalto, helipontos com luzes, torre com treliças, turbinas eólicas com pás aerodinâmicas e o Drone Padrão totalmente detalhados.',
+      },
+    ],
+  },
+  {
+    version: 'V2.0.1',
+    title: 'Unidade de Velocidade (km/h e m/s) nas Configurações',
+    summary:
+      'Adicionada uma aba dedicada de Configurações no menu inicial e no menu de pausa para escolher entre km/h e m/s na telemetria de voo.',
+    kind: 'fix',
+    changes: [
+      {
+        category: 'Novo',
+        text: 'Nova opção nas Configurações para alternar a velocidade do drone e do vento entre km/h e m/s a qualquer momento.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'A preferência escolhida fica salva automaticamente e atualiza tanto o painel de voo quanto a tela do controle remoto no celular.',
+      },
+    ],
+  },
+  {
     version: 'V2.0',
     title: 'Simulador Completo no Celular, Joysticks Dinâmicos e Modo Tela Limpa',
     summary:

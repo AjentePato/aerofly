@@ -1,6 +1,7 @@
 export type StructureMaterialKey =
   | 'concrete_weathered'
   | 'brick_ruin'
+  | 'plaster_ruin'
   | 'wood_aged'
   | 'stone_ancient'
   | 'steel_dark'
@@ -314,7 +315,7 @@ function buildAncientRuinsCourtyard(
 ) {
   const parts: LocalBox[] = [];
 
-  // Stepped stone foundation (top at y = 0.0)
+  // Stepped weathered concrete foundation (top at y = 0.0)
   parts.push({
     lx: 0,
     ly: -1.4,
@@ -322,21 +323,21 @@ function buildAncientRuinsCourtyard(
     hx: 12.5,
     hy: 1.4,
     hz: 12.5,
-    material: 'stone_ancient',
+    material: 'concrete_weathered',
     castShadow: false,
   });
 
-  // North & South entrance archways (z in [±10.3, ±11.7], full x in [-11.8, +11.8])
+  // North & South entrance walls (weathered stucco plaster) + concrete arch lintels
   for (const sz of [-11, 11]) {
-    parts.push({ lx: -7.1, ly: 2.5, lz: sz, hx: 4.7, hy: 2.5, hz: 0.7, material: 'stone_ancient' });
-    parts.push({ lx: 7.1, ly: 2.5, lz: sz, hx: 4.7, hy: 2.5, hz: 0.7, material: 'stone_ancient' });
-    parts.push({ lx: 0, ly: 5.55, lz: sz, hx: 11.8, hy: 0.55, hz: 0.8, material: 'stone_ancient' });
+    parts.push({ lx: -7.1, ly: 2.5, lz: sz, hx: 4.7, hy: 2.5, hz: 0.7, material: 'plaster_ruin' });
+    parts.push({ lx: 7.1, ly: 2.5, lz: sz, hx: 4.7, hy: 2.5, hz: 0.7, material: 'plaster_ruin' });
+    parts.push({ lx: 0, ly: 5.55, lz: sz, hx: 11.8, hy: 0.55, hz: 0.8, material: 'concrete_weathered' });
   }
-  // East & West entrance archways strictly between N/S inner faces (z in [-10.2, +10.2])
+  // East & West entrance walls strictly between N/S inner faces (z in [-10.2, +10.2])
   for (const sx of [-11, 11]) {
-    parts.push({ lx: sx, ly: 2.5, lz: -6.3, hx: 0.7, hy: 2.5, hz: 3.9, material: 'stone_ancient' });
-    parts.push({ lx: sx, ly: 2.5, lz: 6.3, hx: 0.7, hy: 2.5, hz: 3.9, material: 'stone_ancient' });
-    parts.push({ lx: sx, ly: 5.55, lz: 0, hx: 0.8, hy: 0.55, hz: 10.2, material: 'stone_ancient' });
+    parts.push({ lx: sx, ly: 2.5, lz: -6.3, hx: 0.7, hy: 2.5, hz: 3.9, material: 'plaster_ruin' });
+    parts.push({ lx: sx, ly: 2.5, lz: 6.3, hx: 0.7, hy: 2.5, hz: 3.9, material: 'plaster_ruin' });
+    parts.push({ lx: sx, ly: 5.55, lz: 0, hx: 0.8, hy: 0.55, hz: 10.2, material: 'concrete_weathered' });
   }
 
   // Inner colonnade pillars around central sanctum (y in [0.0, 5.6])
@@ -346,10 +347,10 @@ function buildAncientRuinsCourtyard(
     [-5.5, 5.5],
     [5.5, 5.5],
   ]) {
-    parts.push({ lx: cx, ly: 2.8, lz: cz, hx: 0.55, hy: 2.8, hz: 0.55, material: 'stone_ancient' });
+    parts.push({ lx: cx, ly: 2.8, lz: cz, hx: 0.55, hy: 2.8, hz: 0.55, material: 'concrete_weathered' });
   }
-  // Broken lintel sitting cleanly on top of the northern two inner pillars (y in [5.6, 6.4])
-  parts.push({ lx: 0, ly: 6.0, lz: -5.5, hx: 6.3, hy: 0.4, hz: 0.65, material: 'stone_ancient' });
+  // Broken concrete lintel sitting cleanly on top of the northern two inner pillars (y in [5.6, 6.4])
+  parts.push({ lx: 0, ly: 6.0, lz: -5.5, hx: 6.3, hy: 0.4, hz: 0.65, material: 'concrete_weathered' });
 
   addLocalParts(out, x, baseY, z, yaw, parts);
 }

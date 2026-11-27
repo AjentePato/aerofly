@@ -9,6 +9,7 @@ import {
   sticksChangedSignificantly,
 } from '../sim/stickProtocol';
 import { RTC_CONFIG } from '../sim/webrtcConfig';
+import { formatSpeed, loadSavedSpeedUnit } from '../sim/speedUnit';
 import type { DroneTelemetry, StickInput } from '../sim/types';
 
 interface MobileControllerProps {
@@ -363,11 +364,14 @@ export function MobileController({ initialRoom, onExitToSimulator }: MobileContr
                 )}
               </span>
             </div>
-            {telemetry && (
-              <div className="text-[11px] font-mono text-slate-400 tabular-nums mt-0.5 whitespace-nowrap truncate">
-                ALT {Math.round(telemetry.agl)}m · VEL {Math.round(telemetry.speed * 3.6)}km/h · BAT {Math.round(telemetry.batteryPct)}%
-              </div>
-            )}
+            {telemetry && (() => {
+              const spd = formatSpeed(telemetry.speed, telemetry.speedUnit ?? loadSavedSpeedUnit());
+              return (
+                <div className="text-[11px] font-mono text-slate-400 tabular-nums mt-0.5 whitespace-nowrap truncate">
+                  ALT {Math.round(telemetry.agl)}m · VEL {spd.value}{spd.unitLabel} · BAT {Math.round(telemetry.batteryPct)}%
+                </div>
+              );
+            })()}
           </div>
         </div>
 

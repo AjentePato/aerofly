@@ -1,38 +1,10 @@
 import * as THREE from 'three';
+import { createCarbonWeavePbr, createPropBlurTexture } from './proceduralTextures';
 import type { DroneRig } from './droneMesh';
+import type { GraphicsMode } from './types';
 
 interface DisposableEntry {
   dispose: () => void;
-}
-
-function createCarbonWeaveTexture(maxAnisotropy: number, disposables: DisposableEntry[]): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d')!;
-
-  ctx.fillStyle = '#181c23';
-  ctx.fillRect(0, 0, 128, 128);
-
-  const cell = 8;
-  for (let y = 0; y < 128; y += cell) {
-    for (let x = 0; x < 128; x += cell) {
-      const diag = ((x / cell + y / cell) % 2) === 0;
-      ctx.fillStyle = diag ? '#252b36' : '#111419';
-      ctx.fillRect(x, y, cell, cell);
-      ctx.fillStyle = diag ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.22)';
-      ctx.fillRect(x + 1, y + 1, cell - 2, cell / 2);
-    }
-  }
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(6, 6);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = maxAnisotropy;
-  disposables.push(tex);
-  return tex;
 }
 
 function createLipoWrapTexture(maxAnisotropy: number, disposables: DisposableEntry[]): THREE.CanvasTexture {
@@ -64,28 +36,7 @@ function createLipoWrapTexture(maxAnisotropy: number, disposables: DisposableEnt
 }
 
 function createCyanBlurDiscTexture(maxAnisotropy: number, disposables: DisposableEntry[]): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d')!;
-
-  const cx = 128;
-  const cy = 128;
-  const grad = ctx.createRadialGradient(cx, cy, 14, cx, cy, 126);
-  grad.addColorStop(0, 'rgba(56, 189, 248, 0.08)');
-  grad.addColorStop(0.35, 'rgba(56, 189, 248, 0.24)');
-  grad.addColorStop(0.84, 'rgba(14, 165, 233, 0.20)');
-  grad.addColorStop(0.94, 'rgba(125, 211, 252, 0.36)');
-  grad.addColorStop(1, 'rgba(56, 189, 248, 0)');
-
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(cx, cy, 126, 0, Math.PI * 2);
-  ctx.fill();
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = maxAnisotropy;
+  const tex = createPropBlurTexture([42, 175, 240], [125, 211, 252], maxAnisotropy);
   disposables.push(tex);
   return tex;
 }
@@ -113,8 +64,10 @@ function createFpvSweptBladeGeometry(): THREE.ExtrudeGeometry {
 
 export function createFpvFreestyleDroneMesh(
   maxAnisotropy: number,
-  createContactShadow: (disposables: DisposableEntry[]) => THREE.Mesh
+  createContactShadow: (disposables: DisposableEntry[]) => THREE.Mesh,
+  graphicsMode: GraphicsMode = 'realistic'
 ): DroneRig {
+  const isLowPoly = graphicsMode === 'low_poly';
   const disposables: DisposableEntry[] = [];
   const root = new THREE.Group();
 
@@ -127,56 +80,119 @@ export function createFpvFreestyleDroneMesh(
     return m;
   };
 
-  const carbonTex = createCarbonWeaveTexture(maxAnisotropy, disposables);
   const lipoTex = createLipoWrapTexture(maxAnisotropy, disposables);
   const blurTex = createCyanBlurDiscTexture(maxAnisotropy, disposables);
 
-  const carbonMat = trackMat(
-    new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: carbonTex,
-      roughness: 0.42,
-      metalness: 0.25,
-    })
-  );
+  let carbonMat: THREE.MeshStandardMaterial;
+  let purpleAnodMat: THREE.Material;
+  let redMotorMat: THREE.Material;
+  let chromeMat: THREE.Material;
+  let cyanPropMat: THREE.Material;
+  let lensGlassMat: THREE.Material;
+
+  if (isLowPoly) {
+    carbonMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x222731, roughness: 0.78, metalness: 0.2, flatShading: true })
+    );
+    purpleAnodMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x9333ea, roughness: 0.38, metalness: 0.55, flatShading: true })
+    );
+    redMotorMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.38, metalness: 0.55, flatShading: true })
+    );
+    chromeMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0xd1d5db, roughness: 0.35, metalness: 0.7, flatShading: true })
+    );
+    cyanPropMat = trackMat(
+      new THREE.MeshStandardMaterial({
+        color: 0x38bdf8,
+        roughness: 0.38,
+        metalness: 0.08,
+        transparent: true,
+        opacity: 0.9,
+        flatShading: true,
+      })
+    );
+    lensGlassMat = trackMat(
+      new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.15, metalness: 0.35, flatShading: true })
+    );
+  } else {
+    const carbonPbr = createCarbonWeavePbr(maxAnisotropy, 6);
+    disposables.push(carbonPbr.map, carbonPbr.normalMap, carbonPbr.roughnessMap);
+
+    carbonMat = trackMat(
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        map: carbonPbr.map,
+        normalMap: carbonPbr.normalMap,
+        roughnessMap: carbonPbr.roughnessMap,
+        roughness: 0.9,
+        metalness: 0.22,
+      })
+    );
+    purpleAnodMat = trackMat(
+      new THREE.MeshPhysicalMaterial({
+        color: 0x9333ea,
+        roughness: 0.22,
+        metalness: 0.86,
+        anisotropy: 0.55,
+      })
+    );
+    redMotorMat = trackMat(
+      new THREE.MeshPhysicalMaterial({
+        color: 0xdc2626,
+        roughness: 0.22,
+        metalness: 0.86,
+        anisotropy: 0.65,
+      })
+    );
+    chromeMat = trackMat(
+      new THREE.MeshPhysicalMaterial({
+        color: 0xd1d5db,
+        roughness: 0.2,
+        metalness: 0.92,
+        anisotropy: 0.7,
+      })
+    );
+    cyanPropMat = trackMat(
+      new THREE.MeshPhysicalMaterial({
+        color: 0x38bdf8,
+        roughness: 0.22,
+        metalness: 0.08,
+        transparent: true,
+        opacity: 0.9,
+        clearcoat: 0.65,
+        clearcoatRoughness: 0.18,
+      })
+    );
+    lensGlassMat = trackMat(
+      new THREE.MeshPhysicalMaterial({
+        color: 0x061320,
+        roughness: 0.04,
+        metalness: 0.16,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.03,
+        iridescence: 0.85,
+        iridescenceIOR: 1.38,
+      })
+    );
+  }
 
   const matteBlackMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0x171a20,
       roughness: 0.68,
       metalness: 0.08,
-    })
-  );
-
-  const purpleAnodMat = trackMat(
-    new THREE.MeshStandardMaterial({
-      color: 0x9333ea,
-      roughness: 0.24,
-      metalness: 0.84,
-    })
-  );
-
-  const redMotorMat = trackMat(
-    new THREE.MeshStandardMaterial({
-      color: 0xdc2626,
-      roughness: 0.24,
-      metalness: 0.84,
+      flatShading: isLowPoly,
     })
   );
 
   const copperCoilMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0xc27038,
-      roughness: 0.35,
-      metalness: 0.82,
-    })
-  );
-
-  const chromeMat = trackMat(
-    new THREE.MeshStandardMaterial({
-      color: 0xd1d5db,
-      roughness: 0.22,
-      metalness: 0.9,
+      roughness: 0.33,
+      metalness: 0.86,
+      flatShading: isLowPoly,
     })
   );
 
@@ -185,6 +201,7 @@ export function createFpvFreestyleDroneMesh(
       color: 0xea580c,
       roughness: 0.38,
       metalness: 0.2,
+      flatShading: isLowPoly,
     })
   );
 
@@ -193,6 +210,7 @@ export function createFpvFreestyleDroneMesh(
       color: 0xc25a24,
       roughness: 0.6,
       metalness: 0.04,
+      flatShading: isLowPoly,
     })
   );
 
@@ -201,14 +219,17 @@ export function createFpvFreestyleDroneMesh(
       color: 0xeab308,
       roughness: 0.78,
       metalness: 0.04,
+      flatShading: isLowPoly,
     })
   );
 
   const lipoMat = trackMat(
     new THREE.MeshStandardMaterial({
-      map: lipoTex,
+      map: isLowPoly ? null : lipoTex,
+      color: isLowPoly ? 0xf59e0b : 0xffffff,
       roughness: 0.44,
       metalness: 0.08,
+      flatShading: isLowPoly,
     })
   );
 
@@ -217,6 +238,7 @@ export function createFpvFreestyleDroneMesh(
       color: 0xef4444,
       roughness: 0.45,
       metalness: 0.1,
+      flatShading: isLowPoly,
     })
   );
 
@@ -225,18 +247,7 @@ export function createFpvFreestyleDroneMesh(
       color: 0xfacc15,
       roughness: 0.45,
       metalness: 0.1,
-    })
-  );
-
-  const cyanPropMat = trackMat(
-    new THREE.MeshPhysicalMaterial({
-      color: 0x38bdf8,
-      roughness: 0.22,
-      metalness: 0.08,
-      transparent: true,
-      opacity: 0.9,
-      clearcoat: 0.65,
-      clearcoatRoughness: 0.18,
+      flatShading: isLowPoly,
     })
   );
 
@@ -245,6 +256,7 @@ export function createFpvFreestyleDroneMesh(
       color: 0x0284c7,
       roughness: 0.25,
       metalness: 0.78,
+      flatShading: isLowPoly,
     })
   );
 
@@ -255,16 +267,6 @@ export function createFpvFreestyleDroneMesh(
       opacity: 0.74,
       depthWrite: false,
       side: THREE.DoubleSide,
-    })
-  );
-
-  const lensGlassMat = trackMat(
-    new THREE.MeshPhysicalMaterial({
-      color: 0x061320,
-      roughness: 0.05,
-      metalness: 0.2,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.04,
     })
   );
 

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { createPropBlurTexture } from './proceduralTextures';
 import type { DroneRig } from './droneMesh';
+import type { GraphicsMode } from './types';
 
 interface DisposableEntry {
   dispose: () => void;
@@ -119,29 +121,7 @@ function createLitoBladeTexture(maxAnisotropy: number, disposables: DisposableEn
 }
 
 function createLitoBlurDiscTexture(maxAnisotropy: number, disposables: DisposableEntry[]): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d')!;
-
-  const cx = 128;
-  const cy = 128;
-  const grad = ctx.createRadialGradient(cx, cy, 12, cx, cy, 126);
-  grad.addColorStop(0, 'rgba(30, 35, 42, 0.05)');
-  grad.addColorStop(0.35, 'rgba(55, 65, 81, 0.16)');
-  grad.addColorStop(0.84, 'rgba(55, 65, 81, 0.12)');
-  grad.addColorStop(0.91, 'rgba(249, 115, 22, 0.44)');
-  grad.addColorStop(0.97, 'rgba(249, 115, 22, 0.34)');
-  grad.addColorStop(1, 'rgba(249, 115, 22, 0)');
-
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(cx, cy, 126, 0, Math.PI * 2);
-  ctx.fill();
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = maxAnisotropy;
+  const tex = createPropBlurTexture([48, 56, 68], [249, 115, 22], maxAnisotropy);
   disposables.push(tex);
   return tex;
 }
@@ -183,8 +163,10 @@ function createTaperedBladeGeometry(): THREE.ExtrudeGeometry {
 
 export function createLito1DroneMesh(
   maxAnisotropy: number,
-  createContactShadow: (disposables: DisposableEntry[]) => THREE.Mesh
+  createContactShadow: (disposables: DisposableEntry[]) => THREE.Mesh,
+  graphicsMode: GraphicsMode = 'realistic'
 ): DroneRig {
+  const isLowPoly = graphicsMode === 'low_poly';
   const disposables: DisposableEntry[] = [];
   const root = new THREE.Group();
 
@@ -197,17 +179,18 @@ export function createLito1DroneMesh(
     return m;
   };
 
-  const shellTex = createLitoShellTexture(maxAnisotropy, disposables);
+  const shellTex = isLowPoly ? null : createLitoShellTexture(maxAnisotropy, disposables);
   const topDeckTex = createLitoTopDeckTexture(maxAnisotropy, disposables);
   const bladeTex = createLitoBladeTexture(maxAnisotropy, disposables);
   const blurTex = createLitoBlurDiscTexture(maxAnisotropy, disposables);
 
   const shellMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0xc8ced4,
+      color: isLowPoly ? 0xd2d7dd : 0xc8ced4,
       map: shellTex,
-      roughness: 0.5,
+      roughness: isLowPoly ? 0.68 : 0.5,
       metalness: 0.04,
+      flatShading: isLowPoly,
     })
   );
 
@@ -216,6 +199,7 @@ export function createLito1DroneMesh(
       color: 0xb7bcc1,
       roughness: 0.56,
       metalness: 0.05,
+      flatShading: isLowPoly,
     })
   );
 
@@ -224,6 +208,7 @@ export function createLito1DroneMesh(
       color: 0x20242b,
       roughness: 0.5,
       metalness: 0.14,
+      flatShading: isLowPoly,
     })
   );
 
@@ -232,33 +217,52 @@ export function createLito1DroneMesh(
       color: 0x15181e,
       roughness: 0.88,
       metalness: 0.04,
+      flatShading: isLowPoly,
     })
   );
 
   const brushedAlumMat = trackMat(
-    new THREE.MeshStandardMaterial({
-      color: 0xc4cbd4,
-      roughness: 0.24,
-      metalness: 0.88,
-    })
+    isLowPoly
+      ? new THREE.MeshStandardMaterial({
+          color: 0xc8cfd8,
+          roughness: 0.35,
+          metalness: 0.72,
+          flatShading: true,
+        })
+      : new THREE.MeshPhysicalMaterial({
+          color: 0xc8cfd8,
+          roughness: 0.22,
+          metalness: 0.9,
+          anisotropy: 0.68,
+        })
   );
 
   const copperCoilMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0xb96c36,
-      roughness: 0.34,
-      metalness: 0.82,
+      roughness: 0.32,
+      metalness: 0.86,
+      flatShading: isLowPoly,
     })
   );
 
   const opticalLensMat = trackMat(
-    new THREE.MeshPhysicalMaterial({
-      color: 0x0a1726,
-      roughness: 0.06,
-      metalness: 0.18,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.05,
-    })
+    isLowPoly
+      ? new THREE.MeshStandardMaterial({
+          color: 0x0f172a,
+          roughness: 0.15,
+          metalness: 0.35,
+          flatShading: true,
+        })
+      : new THREE.MeshPhysicalMaterial({
+          color: 0x0a1726,
+          roughness: 0.04,
+          metalness: 0.16,
+          clearcoat: 1.0,
+          clearcoatRoughness: 0.04,
+          iridescence: 0.82,
+          iridescenceIOR: 1.38,
+        })
   );
 
   const bladeMat = trackMat(

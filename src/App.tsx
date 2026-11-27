@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DroneCanvas } from './components/DroneCanvas';
+import { CanvasErrorBoundary } from './components/CanvasErrorBoundary';
 import { TitleOverlay } from './components/TitleOverlay';
 import { FlightHUD } from './components/FlightHUD';
 import { OutcomeModal, PauseModal } from './components/Modals';
@@ -12,6 +13,8 @@ import { readBrowserGamepad, type GamepadStatus } from './sim/gamepad';
 import { decodeBinaryStick } from './sim/stickProtocol';
 import { RTC_CONFIG, RTC_STICK_CHANNEL_OPTIONS } from './sim/webrtcConfig';
 import { loadSavedDroneSkin, saveDroneSkin } from './sim/droneSkins';
+import { loadSavedSpeedUnit, saveSpeedUnit } from './sim/speedUnit';
+import { loadSavedGraphicsMode, saveGraphicsMode } from './sim/graphicsMode';
 import { detectTouchSticksDefault } from './sim/touchControls';
 import type {
   CameraMode,
@@ -20,8 +23,10 @@ import type {
   DroneTelemetry,
   FlightMode,
   GamePhase,
+  GraphicsMode,
   MissionId,
   MissionProgress,
+  SpeedUnit,
   StickInput,
 } from './sim/types';
 
@@ -77,6 +82,8 @@ export default function App() {
   const [flightMode, setFlightMode] = useState<FlightMode>('normal');
   const [cameraMode, setCameraMode] = useState<CameraMode>('chase');
   const [droneSkin, setDroneSkin] = useState<DroneSkinId>(() => loadSavedDroneSkin());
+  const [speedUnit, setSpeedUnit] = useState<SpeedUnit>(() => loadSavedSpeedUnit());
+  const [graphicsMode, setGraphicsMode] = useState<GraphicsMode>(() => loadSavedGraphicsMode());
   const [showcaseDrone, setShowcaseDrone] = useState(false);
   const [windEnabled, setWindEnabled] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -143,6 +150,16 @@ export default function App() {
   const handleSelectDroneSkin = useCallback((skin: DroneSkinId) => {
     setDroneSkin(skin);
     saveDroneSkin(skin);
+  }, []);
+
+  const handleSelectSpeedUnit = useCallback((unit: SpeedUnit) => {
+    setSpeedUnit(unit);
+    saveSpeedUnit(unit);
+  }, []);
+
+  const handleSelectGraphicsMode = useCallback((mode: GraphicsMode) => {
+    setGraphicsMode(mode);
+    saveGraphicsMode(mode);
   }, []);
 
   const handleStartFlight = useCallback(() => {
@@ -539,39 +556,46 @@ export default function App() {
 
   return (
     <main className="relative w-full h-full overflow-hidden">
-      <DroneCanvas
-        phase={phase}
-        missionId={missionId}
-        flightMode={flightMode}
-        cameraMode={cameraMode}
-        droneSkin={droneSkin}
-        showcaseDrone={phase === 'title' && showcaseDrone}
-        windEnabled={windEnabled}
-        muted={muted}
-        remoteStickRef={remoteStickRef}
-        remoteActiveRef={remoteActiveRef}
-        touchStickRef={touchStickRef}
-        touchActiveRef={touchActiveRef}
-        virtualArmHoldRef={virtualArmHoldRef}
-        resetNonce={resetNonce}
-        onHudUpdate={handleHudUpdate}
-        onMissionComplete={handleMissionComplete}
-        onCrash={handleCrash}
-        onTogglePause={handleTogglePause}
-        onToggleHud={handleToggleHud}
-        onCycleCamera={cycleCamera}
-        onSelectFlightMode={setFlightMode}
-        onToggleMute={() => setMuted((m) => !m)}
-        onTriggerReset={handleReset}
-        onGamepadStatusChange={setGamepadStatus}
-      />
+      <CanvasErrorBoundary>
+        <DroneCanvas
+          phase={phase}
+          missionId={missionId}
+          flightMode={flightMode}
+          cameraMode={cameraMode}
+          droneSkin={droneSkin}
+          speedUnit={speedUnit}
+          graphicsMode={graphicsMode}
+          showcaseDrone={phase === 'title' && showcaseDrone}
+          windEnabled={windEnabled}
+          muted={muted}
+          remoteStickRef={remoteStickRef}
+          remoteActiveRef={remoteActiveRef}
+          touchStickRef={touchStickRef}
+          touchActiveRef={touchActiveRef}
+          virtualArmHoldRef={virtualArmHoldRef}
+          resetNonce={resetNonce}
+          onHudUpdate={handleHudUpdate}
+          onMissionComplete={handleMissionComplete}
+          onCrash={handleCrash}
+          onTogglePause={handleTogglePause}
+          onToggleHud={handleToggleHud}
+          onCycleCamera={cycleCamera}
+          onSelectFlightMode={setFlightMode}
+          onToggleMute={() => setMuted((m) => !m)}
+          onTriggerReset={handleReset}
+          onGamepadStatusChange={setGamepadStatus}
+        />
+      </CanvasErrorBoundary>
 
       {phase === 'title' && (
         <TitleOverlay
           selectedMission={missionId}
           flightMode={flightMode}
           droneSkin={droneSkin}
+          speedUnit={speedUnit}
+          graphicsMode={graphicsMode}
           windEnabled={windEnabled}
+          muted={muted}
           touchSticksEnabled={touchSticksEnabled}
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
@@ -580,8 +604,12 @@ export default function App() {
           onSelectMission={handleSelectMission}
           onSelectFlightMode={setFlightMode}
           onSelectDroneSkin={handleSelectDroneSkin}
+          onSelectSpeedUnit={handleSelectSpeedUnit}
+          onSelectGraphicsMode={handleSelectGraphicsMode}
           onShowcaseChange={setShowcaseDrone}
           onToggleWind={() => setWindEnabled((w) => !w)}
+          onToggleMute={() => setMuted((m) => !m)}
+          onToggleTouchSticks={() => setTouchSticksEnabled((v) => !v)}
           onStartFlight={handleStartFlight}
           onOpenPairing={() => setShowPairing(true)}
           onOpenChangelog={() => setShowChangelog(true)}
@@ -600,6 +628,7 @@ export default function App() {
           muted={muted}
           hudHidden={hudHidden}
           touchSticksEnabled={touchSticksEnabled}
+          speedUnit={speedUnit}
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
           gamepadLabel={gamepadStatus.label}
@@ -620,7 +649,10 @@ export default function App() {
           flightMode={flightMode}
           cameraMode={cameraMode}
           droneSkin={droneSkin}
+          speedUnit={speedUnit}
+          graphicsMode={graphicsMode}
           windEnabled={windEnabled}
+          muted={muted}
           touchSticksEnabled={touchSticksEnabled}
           hudHidden={hudHidden}
           controllerConnected={controllerCount > 0}
@@ -636,7 +668,10 @@ export default function App() {
           onSelectFlightMode={setFlightMode}
           onSelectCameraMode={setCameraMode}
           onSelectDroneSkin={handleSelectDroneSkin}
+          onSelectSpeedUnit={handleSelectSpeedUnit}
+          onSelectGraphicsMode={handleSelectGraphicsMode}
           onToggleWind={() => setWindEnabled((w) => !w)}
+          onToggleMute={() => setMuted((m) => !m)}
           onToggleTouchSticks={() => setTouchSticksEnabled((v) => !v)}
           onToggleHud={handleToggleHud}
           onOpenPairing={() => setShowPairing(true)}

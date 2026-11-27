@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react';
-import { Gamepad2, Palette, Play, Smartphone, Sparkles, Target, Wind } from 'lucide-react';
+import { Gamepad2, Gauge, Monitor, Palette, Play, Settings, Smartphone, Sparkles, Target, Touchpad, Volume2, VolumeX, Wind } from 'lucide-react';
 import { MISSIONS } from '../sim/missions';
 import { GAME_VERSION } from '../sim/changelog';
 import { getDroneSkinOption } from '../sim/droneSkins';
+import { GRAPHICS_MODE_OPTIONS, getGraphicsModeOption } from '../sim/graphicsMode';
 import { DroneSkinSelector } from './DroneSkinSelector';
-import type { DroneSkinId, FlightMode, MissionId } from '../sim/types';
+import type { DroneSkinId, FlightMode, GraphicsMode, MissionId, SpeedUnit } from '../sim/types';
 
 interface TitleOverlayProps {
   selectedMission: MissionId;
   flightMode: FlightMode;
   droneSkin: DroneSkinId;
+  speedUnit: SpeedUnit;
+  graphicsMode: GraphicsMode;
   windEnabled: boolean;
+  muted: boolean;
   touchSticksEnabled?: boolean;
   controllerConnected: boolean;
   gamepadConnected: boolean;
@@ -19,8 +23,12 @@ interface TitleOverlayProps {
   onSelectMission: (id: MissionId) => void;
   onSelectFlightMode: (mode: FlightMode) => void;
   onSelectDroneSkin: (skin: DroneSkinId) => void;
+  onSelectSpeedUnit: (unit: SpeedUnit) => void;
+  onSelectGraphicsMode: (mode: GraphicsMode) => void;
   onShowcaseChange?: (active: boolean) => void;
   onToggleWind: () => void;
+  onToggleMute: () => void;
+  onToggleTouchSticks: () => void;
   onStartFlight: () => void;
   onOpenPairing: () => void;
   onOpenChangelog: () => void;
@@ -35,7 +43,10 @@ export function TitleOverlay({
   selectedMission,
   flightMode,
   droneSkin,
+  speedUnit,
+  graphicsMode,
   windEnabled,
+  muted,
   touchSticksEnabled = false,
   controllerConnected,
   gamepadConnected,
@@ -44,13 +55,17 @@ export function TitleOverlay({
   onSelectMission,
   onSelectFlightMode,
   onSelectDroneSkin,
+  onSelectSpeedUnit,
+  onSelectGraphicsMode,
   onShowcaseChange,
   onToggleWind,
+  onToggleMute,
+  onToggleTouchSticks,
   onStartFlight,
   onOpenPairing,
   onOpenChangelog,
 }: TitleOverlayProps) {
-  const [activeTab, setActiveTab] = useState<'missions' | 'texture'>('missions');
+  const [activeTab, setActiveTab] = useState<'missions' | 'texture' | 'settings'>('missions');
 
   useEffect(() => {
     onShowcaseChange?.(activeTab === 'texture');
@@ -135,9 +150,9 @@ export function TitleOverlay({
           Pratique decolagem, orientação e curvas antes de voar um drone real — direto na tela do celular, teclado, controle Xbox/PS4 ou pareando outro aparelho.
         </p>
 
-        {/* Primary Menu Tabs: Missões & Voo | Textura do Drone */}
+        {/* Primary Menu Tabs: Missões | Textura | Configurações */}
         <div
-          className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-slate-900/90 border border-slate-700/80"
+          className="grid grid-cols-3 gap-1 p-1 rounded-lg bg-slate-900/90 border border-slate-700/80"
           role="tablist"
           aria-label="Seções do menu inicial"
         >
@@ -148,14 +163,14 @@ export function TitleOverlay({
             aria-selected={activeTab === 'missions'}
             aria-controls="title-panel-missions"
             onClick={() => setActiveTab('missions')}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+            className={`px-2 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === 'missions'
                 ? 'bg-amber-500 text-slate-950'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
             }`}
           >
             <Target className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            <span>Missões & Voo</span>
+            <span>Missões</span>
           </button>
 
           <button
@@ -165,27 +180,31 @@ export function TitleOverlay({
             aria-selected={activeTab === 'texture'}
             aria-controls="title-panel-texture"
             onClick={() => setActiveTab('texture')}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+            className={`px-2 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === 'texture'
                 ? 'bg-amber-500 text-slate-950'
                 : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
             }`}
           >
             <Palette className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            <span>Textura do Drone</span>
-            <span
-              className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                activeTab === 'texture'
-                  ? 'bg-slate-950/20 text-slate-950'
-                  : 'bg-slate-800 text-amber-300'
-              }`}
-            >
-              {droneSkin === 'dji_lito_1'
-                ? 'Moderno'
-                : droneSkin === 'fpv_freestyle'
-                  ? 'FPV'
-                  : 'Padrão'}
-            </span>
+            <span>Textura</span>
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            id="title-tab-settings"
+            aria-selected={activeTab === 'settings'}
+            aria-controls="title-panel-settings"
+            onClick={() => setActiveTab('settings')}
+            className={`px-2 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
+              activeTab === 'settings'
+                ? 'bg-amber-500 text-slate-950'
+                : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span>Configurações</span>
           </button>
         </div>
 
@@ -272,7 +291,7 @@ export function TitleOverlay({
               </p>
             </div>
           </div>
-        ) : (
+        ) : activeTab === 'texture' ? (
           <div
             id="title-panel-texture"
             role="tabpanel"
@@ -297,6 +316,136 @@ export function TitleOverlay({
             <p className="text-xs text-slate-400 leading-snug">
               A prévia 3D ao lado atualiza na hora para você conferir os detalhes antes de decolar.
             </p>
+          </div>
+        ) : (
+          <div
+            id="title-panel-settings"
+            role="tabpanel"
+            aria-labelledby="title-tab-settings"
+            className="flex flex-col gap-2.5"
+          >
+            <div className="rounded-lg border border-slate-700/80 bg-slate-900/85 p-3 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                  <Monitor className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                  Gráficos do Jogo
+                </span>
+                <span className="text-[11px] font-mono text-slate-400">
+                  {graphicsMode === 'low_poly' ? 'Clássico Leve' : 'Alta Qualidade'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Qualidade gráfica">
+                {GRAPHICS_MODE_OPTIONS.map((opt) => {
+                  const active = graphicsMode === opt.id;
+                  const testId = opt.id === 'low_poly' ? 'title-graphics-low-poly' : 'title-graphics-realistic';
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      data-testid={testId}
+                      onClick={() => onSelectGraphicsMode(opt.id)}
+                      className={`py-2 px-2.5 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-amber-500 text-slate-950 border-amber-400'
+                          : 'bg-slate-950/70 text-slate-300 border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-slate-400 leading-tight">
+                {getGraphicsModeOption(graphicsMode).description}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-slate-700/80 bg-slate-900/85 p-3 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+                  <Gauge className="w-3.5 h-3.5 text-amber-400" aria-hidden="true" />
+                  Unidade de Velocidade
+                </span>
+                <span className="text-[11px] font-mono text-slate-400">
+                  {speedUnit === 'kmh' ? 'Quilômetros/hora' : 'Metros/segundo'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Unidade de velocidade">
+                <button
+                  type="button"
+                  data-testid="title-speed-unit-kmh"
+                  onClick={() => onSelectSpeedUnit('kmh')}
+                  className={`py-2 px-3 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
+                    speedUnit === 'kmh'
+                      ? 'bg-amber-500 text-slate-950 border-amber-400'
+                      : 'bg-slate-950/70 text-slate-300 border-slate-700 hover:border-slate-500'
+                  }`}
+                >
+                  km/h
+                </button>
+                <button
+                  type="button"
+                  data-testid="title-speed-unit-ms"
+                  onClick={() => onSelectSpeedUnit('ms')}
+                  className={`py-2 px-3 rounded-md text-xs font-semibold border transition-colors cursor-pointer ${
+                    speedUnit === 'ms'
+                      ? 'bg-amber-500 text-slate-950 border-amber-400'
+                      : 'bg-slate-950/70 text-slate-300 border-slate-700 hover:border-slate-500'
+                  }`}
+                >
+                  m/s
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              data-testid="title-toggle-touch-sticks"
+              onClick={onToggleTouchSticks}
+              className={`w-full px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
+                touchSticksEnabled
+                  ? 'bg-amber-500/15 border-amber-400 text-amber-200'
+                  : 'bg-slate-900/85 border-slate-700 text-slate-300 hover:border-slate-500'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Touchpad className="w-4 h-4" aria-hidden="true" />
+                Joysticks Virtuais na Tela
+              </span>
+              <span className="font-mono">{touchSticksEnabled ? 'ATIVADO' : 'DESLIGADO'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onToggleWind}
+              className={`w-full px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
+                windEnabled
+                  ? 'bg-sky-500/15 border-sky-400 text-sky-200'
+                  : 'bg-slate-900/85 border-slate-700 text-slate-300 hover:border-slate-500'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <Wind className="w-4 h-4" aria-hidden="true" />
+                Simulação de Vento Lateral
+              </span>
+              <span className="font-mono">{windEnabled ? 'ATIVADO' : 'DESLIGADO'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onToggleMute}
+              className={`w-full px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
+                !muted
+                  ? 'bg-slate-900/85 border-slate-700 text-slate-200 hover:border-slate-500'
+                  : 'bg-slate-900/85 border-slate-700 text-slate-400 hover:border-slate-500'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                {muted ? <VolumeX className="w-4 h-4" aria-hidden="true" /> : <Volume2 className="w-4 h-4 text-emerald-400" aria-hidden="true" />}
+                Som do Simulador
+              </span>
+              <span className="font-mono">{muted ? 'MUDO' : 'ATIVADO'}</span>
+            </button>
           </div>
         )}
 

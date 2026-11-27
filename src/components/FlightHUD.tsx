@@ -14,11 +14,13 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { getMissionById } from '../sim/missions';
+import { formatSpeed } from '../sim/speedUnit';
 import type {
   CameraMode,
   DroneTelemetry,
   FlightMode,
   MissionProgress,
+  SpeedUnit,
   StickInput,
 } from '../sim/types';
 
@@ -29,6 +31,7 @@ interface FlightHUDProps {
   muted: boolean;
   hudHidden: boolean;
   touchSticksEnabled: boolean;
+  speedUnit: SpeedUnit;
   controllerConnected: boolean;
   gamepadConnected: boolean;
   gamepadLabel?: string;
@@ -75,6 +78,7 @@ export function FlightHUD({
   muted,
   hudHidden,
   touchSticksEnabled,
+  speedUnit,
   controllerConnected,
   gamepadConnected,
   gamepadLabel,
@@ -88,7 +92,8 @@ export function FlightHUD({
   onVirtualArmHoldChange,
 }: FlightHUDProps) {
   const mission = getMissionById(progress.missionId);
-  const speedKmh = Math.round(telemetry.speed * 3.6);
+  const formattedSpeed = formatSpeed(telemetry.speed, speedUnit);
+  const formattedWind = formatSpeed(telemetry.windSpeed, speedUnit);
   const altMeters = Math.round(telemetry.agl);
   const batPct = Math.round(telemetry.batteryPct);
 
@@ -508,8 +513,12 @@ export function FlightHUD({
 
           <div>
             <div className="text-[10px] font-medium text-slate-400">VELOCIDADE</div>
-            <div className="font-mono text-base sm:text-xl font-bold text-white leading-tight">
-              {speedKmh}<span className="text-xs font-normal text-slate-400 ml-0.5">km/h</span>
+            <div
+              data-testid="hud-speed-value"
+              className="font-mono text-base sm:text-xl font-bold text-white leading-tight"
+            >
+              {formattedSpeed.value}
+              <span className="text-xs font-normal text-slate-400 ml-0.5">{formattedSpeed.unitLabel}</span>
             </div>
           </div>
 
@@ -535,7 +544,8 @@ export function FlightHUD({
             <div className="hidden md:block">
               <div className="text-[10px] font-medium text-slate-400">VENTO</div>
               <div className="font-mono text-xl font-bold text-sky-300 leading-tight">
-                {Math.round(telemetry.windSpeed * 3.6)}<span className="text-xs font-normal text-slate-400 ml-0.5">km/h</span>
+                {formattedWind.value}
+                <span className="text-xs font-normal text-slate-400 ml-0.5">{formattedWind.unitLabel}</span>
               </div>
             </div>
           )}

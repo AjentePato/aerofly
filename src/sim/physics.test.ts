@@ -5,6 +5,7 @@ import {
   WORLD_RADIUS,
   computeBodyUpVector,
   createInitialDroneState,
+  extractTelemetry,
   getWorldRocks,
   getWorldTrees,
   groundHeightAt,
@@ -31,6 +32,12 @@ import {
 } from './changelog';
 import { DRONE_SKINS, getDroneSkinOption, isValidDroneSkin } from './droneSkins';
 import {
+  DEFAULT_GRAPHICS_MODE,
+  GRAPHICS_MODE_OPTIONS,
+  getGraphicsModeOption,
+  isValidGraphicsMode,
+} from './graphicsMode';
+import {
   STICK_PACKET_BYTES,
   decodeBinaryStick,
   encodeBinaryStick,
@@ -49,6 +56,7 @@ import {
   computeAdaptiveVerticalFov,
   shouldEnableTouchSticksByDefault,
 } from './touchControls';
+import { DEFAULT_SPEED_UNIT, formatSpeed, isValidSpeedUnit } from './speedUnit';
 import type { PhysicsConfig, StickInput } from './types';
 
 const neutralInput: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
@@ -773,5 +781,33 @@ test('touch controls default detection, stick radius clamping, and portrait FOV 
   assert.equal(computeAdaptiveVerticalFov(62, 1.0), 62);
   const portraitFov = computeAdaptiveVerticalFov(62, 390 / 844);
   assert.ok(portraitFov > 75 && portraitFov <= 98, `Expected portrait FOV boost, got ${portraitFov}`);
-  assert.equal(GAME_VERSION, 'V2.0');
+  assert.equal(GAME_VERSION, 'V2.2');
+});
+
+test('speed unit helper converts between m/s and km/h cleanly and propagates in telemetry', () => {
+  assert.equal(DEFAULT_SPEED_UNIT, 'kmh');
+  assert.equal(isValidSpeedUnit('kmh'), true);
+  assert.equal(isValidSpeedUnit('ms'), true);
+  assert.equal(isValidSpeedUnit('mph'), false);
+
+  assert.deepEqual(formatSpeed(0, 'kmh'), { value: '0', unitLabel: 'km/h' });
+  assert.deepEqual(formatSpeed(0, 'ms'), { value: '0.0', unitLabel: 'm/s' });
+  assert.deepEqual(formatSpeed(10, 'kmh'), { value: '36', unitLabel: 'km/h' });
+  assert.deepEqual(formatSpeed(10, 'ms'), { value: '10.0', unitLabel: 'm/s' });
+  assert.deepEqual(formatSpeed(7.24, 'ms'), { value: '7.2', unitLabel: 'm/s' });
+  assert.deepEqual(formatSpeed(-2, 'ms'), { value: '0.0', unitLabel: 'm/s' });
+
+  const drone = createInitialDroneState(true);
+  const telemMs = extractTelemetry(drone, 'normal', 'chase', normalConfig, 0, false, 'ms');
+  assert.equal(telemMs.speedUnit, 'ms');
+});
+
+test('graphics mode options support Low-Poly (Antiga) and Realista (Atual) with strict validation', () => {
+  assert.equal(DEFAULT_GRAPHICS_MODE, 'realistic');
+  assert.equal(GRAPHICS_MODE_OPTIONS.length, 2);
+  assert.equal(isValidGraphicsMode('low_poly'), true);
+  assert.equal(isValidGraphicsMode('realistic'), true);
+  assert.equal(isValidGraphicsMode('ultra'), false);
+  assert.equal(getGraphicsModeOption('low_poly').label, 'Low-Poly (Antiga)');
+  assert.equal(getGraphicsModeOption('realistic').label, 'Realista (Atual)');
 });

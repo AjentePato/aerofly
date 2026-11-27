@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { createDroneMesh } from '../sim/droneMesh';
 import { buildTrainingWorld } from '../sim/worldBuilder';
@@ -28,8 +28,10 @@ import type {
   DroneTelemetry,
   FlightMode,
   GamePhase,
+  GraphicsMode,
   MissionId,
   MissionProgress,
+  SpeedUnit,
   StickInput,
 } from '../sim/types';
 
@@ -39,6 +41,8 @@ export interface SimBridgeProps {
   flightMode: FlightMode;
   cameraMode: CameraMode;
   droneSkin: DroneSkinId;
+  speedUnit: SpeedUnit;
+  graphicsMode: GraphicsMode;
   showcaseDrone?: boolean;
   windEnabled: boolean;
   muted: boolean;
@@ -79,29 +83,44 @@ export function DroneCanvas(props: SimBridgeProps) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
+  const [renderError, setRenderError] = useState(false);
+  const [canvasRetryNonce, setCanvasRetryNonce] = useState(0);
 
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
+    setRenderError(false);
 
     const isSoftwareGl = (() => {
-      const gl = document.createElement('canvas').getContext('webgl2');
-      if (!gl) return true;
-      const ext = gl.getExtension('WEBGL_debug_renderer_info');
-      const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
-      const gpu = String(gl.getParameter(param));
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
-      return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
+      try {
+        const gl = document.createElement('canvas').getContext('webgl2');
+        if (!gl) return true;
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
+        const gpu = String(gl.getParameter(param));
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+        return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
+      } catch {
+        return true;
+      }
     })();
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance',
-      preserveDrawingBuffer: isSoftwareGl,
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !isSoftwareGl,
+        powerPreference: 'high-performance',
+        preserveDrawingBuffer: isSoftwareGl,
+      });
+    } catch (err) {
+      console.error('Falha ao inicializar WebGLRenderer:', err);
+      setRenderError(true);
+      return;
+    }
+
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 0.48;
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 1.5));
     renderer.shadowMap.enabled = !isSoftwareGl;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -113,23 +132,32 @@ export function DroneCanvas(props: SimBridgeProps) {
     const camera = new THREE.PerspectiveCamera(
       62,
       (container.clientWidth || window.innerWidth) / (container.clientHeight || window.innerHeight),
-      0.25,
-      1800
+      0.3,
+      12000
     );
 
     const maxAniso = isSoftwareGl ? 1 : Math.min(8, renderer.capabilities.getMaxAnisotropy());
-    const world = buildTrainingWorld(scene, renderer, isSoftwareGl);
+    let activeGraphicsMode: GraphicsMode = propsRef.current.graphicsMode;
+    let world: ReturnType<typeof buildTrainingWorld>;
     let activeDroneSkin: DroneSkinId = propsRef.current.droneSkin;
-    let droneRig = createDroneMesh(activeDroneSkin, maxAniso);
+    let droneRig: ReturnType<typeof createDroneMesh>;
+    try {
+      world = buildTrainingWorld(scene, renderer, isSoftwareGl, activeGraphicsMode);
+      droneRig = createDroneMesh(activeDroneSkin, maxAniso, activeGraphicsMode);
+    } catch (err) {
+      console.error('Falha ao construir mundo 3D:', err);
+      renderer.dispose();
+      if (renderer.domElement.parentNode === container) {
+        container.removeChild(renderer.domElement);
+      }
+      setRenderError(true);
+      return;
+    }
     scene.add(droneRig.root);
     scene.add(droneRig.contactShadow);
 
     const crashEffects = createCrashEffects(scene);
     const audio = new DroneAudioEngine();
-
-    if (!isSoftwareGl) {
-      renderer.compile(scene, camera);
-    }
 
     // Simulation state held inside effect (never triggers React re-renders per frame)
     let droneState = createInitialDroneState();
@@ -252,10 +280,17 @@ export function DroneCanvas(props: SimBridgeProps) {
       typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null;
     resizeObserver?.observe(container);
 
+    let contextLost = false;
     const onContextLost = (e: Event) => {
       e.preventDefault();
+      contextLost = true;
+    };
+    const onContextRestored = () => {
+      contextLost = false;
+      setCanvasRetryNonce((n) => n + 1);
     };
     renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
 
     function sampleControllerSticks(gpSticks?: StickInput): StickInput {
       let throttle = 0;
@@ -393,6 +428,10 @@ export function DroneCanvas(props: SimBridgeProps) {
 
     function tick(now = performance.now()) {
       if (disposed) return;
+      if (contextLost) {
+        frameId = requestAnimationFrame(tick);
+        return;
+      }
       const rawDt = (now - prevTimestamp) / 1000;
       prevTimestamp = now;
       const dt = Math.min(Math.max(rawDt, 0.001), 0.05);
@@ -420,7 +459,7 @@ export function DroneCanvas(props: SimBridgeProps) {
       }
       lastPhase = cur.phase;
 
-      // Ambient world motion (wind turbines, windsock, tower beacon)
+      // Ambient world motion (wind turbines, windsock, tower beacon, animated lake/clouds/foliage)
       turbineAngle -= dt * (cur.windEnabled ? 1.8 : 0.85);
       for (const rotor of world.turbineRotors) {
         rotor.rotation.z = turbineAngle;
@@ -430,14 +469,23 @@ export function DroneCanvas(props: SimBridgeProps) {
         (cur.windEnabled ? -0.1 : -0.52) +
         Math.sin(elapsed * 4.4) * (cur.windEnabled ? 0.045 : 0.022);
       world.towerBeaconMat.emissiveIntensity = 1.5 + Math.max(0, Math.sin(elapsed * 3.2)) * 2.5;
+      world.updateEnvironment(elapsed, cur.windEnabled);
 
       const missionDef = getMissionById(cur.missionId);
       const gpSample = readBrowserGamepad();
       emitGamepadIfChanged(gpSample.status);
       let activeSticks: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
 
-      // Live swap drone model/texture without resetting flight or tearing down WebGL
-      if (cur.droneSkin !== activeDroneSkin) {
+      // Live swap world graphics mode (Low-Poly vs Realistic) without tearing down WebGL or resetting flight
+      const graphicsChanged = cur.graphicsMode !== activeGraphicsMode;
+      if (graphicsChanged) {
+        world.dispose();
+        activeGraphicsMode = cur.graphicsMode;
+        world = buildTrainingWorld(scene, renderer, isSoftwareGl, activeGraphicsMode);
+      }
+
+      // Live swap drone model/texture or graphics fidelity without resetting flight
+      if (cur.droneSkin !== activeDroneSkin || graphicsChanged) {
         const prevPos = droneRig.root.position.clone();
         const prevQuat = droneRig.root.quaternion.clone();
         const prevVis = droneRig.root.visible;
@@ -447,7 +495,7 @@ export function DroneCanvas(props: SimBridgeProps) {
         droneRig.dispose();
 
         activeDroneSkin = cur.droneSkin;
-        droneRig = createDroneMesh(activeDroneSkin, maxAniso);
+        droneRig = createDroneMesh(activeDroneSkin, maxAniso, activeGraphicsMode);
         droneRig.root.position.copy(prevPos);
         droneRig.root.quaternion.copy(prevQuat);
         droneRig.root.visible = prevVis;
@@ -468,9 +516,9 @@ export function DroneCanvas(props: SimBridgeProps) {
       if (cur.phase === 'title') {
         // Title screen: Live orbital camera tour around the sunlit airfield & hovering drone
         droneRig.frontLedMat.emissive.setHex(0x38bdf8);
-        droneRig.frontLedMat.emissiveIntensity = 2.2;
+        droneRig.frontLedMat.emissiveIntensity = 1.2;
         droneRig.rearLedMat.emissive.setHex(0xef4444);
-        droneRig.rearLedMat.emissiveIntensity = 2.2;
+        droneRig.rearLedMat.emissiveIntensity = 1.2;
         const tourAngle = elapsed * (cur.showcaseDrone ? 0.36 : 0.18);
         const hoverY = 3.2 + Math.sin(elapsed * 1.6) * (cur.showcaseDrone ? 0.08 : 0.22);
         droneRig.root.visible = true;
@@ -627,7 +675,7 @@ export function DroneCanvas(props: SimBridgeProps) {
           }
         }
 
-        crashEffects.update(dt);
+        crashEffects.update(dt, camera.quaternion);
 
         // Smooth coordinated yaw-bank visual lean + gimbal pan lead when turning (Q/E)
         const targetYawBank =
@@ -773,11 +821,14 @@ export function DroneCanvas(props: SimBridgeProps) {
         // Paused or GameOver: silence motors smoothly and keep particles settling
         audio.updateMotors(0, false, 0);
         if (cur.phase === 'gameover') {
-          crashEffects.update(dt);
+          crashEffects.update(dt, camera.quaternion);
         }
       }
 
       world.updateMissionVisuals(missionDef, missionProgress, elapsed);
+      if (cur.phase === 'title') {
+        world.hoverZoneMesh.visible = false;
+      }
 
       // Throttled HUD updates (~10Hz normal, ~20Hz while charging arming bar)
       const hudIntervalMs = armingProgress > 0 ? 45 : 95;
@@ -793,7 +844,8 @@ export function DroneCanvas(props: SimBridgeProps) {
             windTimeSec: elapsed,
           },
           armingProgress,
-          awaitingStickRelease
+          awaitingStickRelease,
+          cur.speedUnit
         );
         cur.onHudUpdate(telemetry, missionProgress, activeSticks);
       }
@@ -823,6 +875,7 @@ export function DroneCanvas(props: SimBridgeProps) {
       window.removeEventListener('orientationchange', onResize);
       resizeObserver?.disconnect();
       renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
+      renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
       audio.dispose();
       crashEffects.dispose();
       droneRig.dispose();
@@ -832,7 +885,25 @@ export function DroneCanvas(props: SimBridgeProps) {
         container.removeChild(renderer.domElement);
       }
     };
-  }, []);
+  }, [canvasRetryNonce]);
 
-  return <div ref={mountRef} className="fixed inset-0 w-full h-full overflow-hidden" data-testid="drone-canvas-container" />;
+  return (
+    <div ref={mountRef} className="fixed inset-0 w-full h-full overflow-hidden bg-slate-950" data-testid="drone-canvas-container">
+      {renderError && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center p-6 bg-slate-950 text-slate-100" role="alert">
+          <div className="max-w-sm rounded-xl border border-slate-800 bg-slate-900/95 p-5 text-center flex flex-col items-center gap-3">
+            <p className="text-sm font-semibold text-white">Renderização 3D indisponível no momento</p>
+            <p className="text-xs text-slate-400">Verifique se a aceleração WebGL está ativa no navegador.</p>
+            <button
+              type="button"
+              onClick={() => setCanvasRetryNonce((n) => n + 1)}
+              className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer"
+            >
+              Tentar Novamente
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

@@ -4,6 +4,10 @@ export type CameraMode = 'chase' | 'fpv';
 
 export type DroneSkinId = 'default' | 'dji_lito_1' | 'fpv_freestyle';
 
+export type SpeedUnit = 'kmh' | 'ms';
+
+export type GraphicsMode = 'realistic' | 'low_poly';
+
 export type GamePhase = 'title' | 'playing' | 'paused' | 'gameover';
 
 export type MissionId =
@@ -76,6 +80,7 @@ export interface DroneTelemetry {
   cameraMode: CameraMode;
   windSpeed: number;
   motorPower: number;
+  speedUnit?: SpeedUnit;
 }
 
 export interface GatePoint {

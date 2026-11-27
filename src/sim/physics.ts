@@ -4,6 +4,7 @@ import type {
   DroneTelemetry,
   FlightMode,
   PhysicsConfig,
+  SpeedUnit,
   StickInput,
   Vec3,
 } from './types';
@@ -768,7 +769,8 @@ export function extractTelemetry(
   cameraMode: DroneTelemetry['cameraMode'],
   config: PhysicsConfig,
   armingProgress = 0,
-  awaitingStickRelease = false
+  awaitingStickRelease = false,
+  speedUnit?: SpeedUnit
 ): DroneTelemetry {
   const floorY = surfaceHeightAt(state.position.x, state.position.z, state.position.y);
   const agl = Math.max(0, state.position.y - DRONE_SKID_HEIGHT - floorY);
@@ -798,5 +800,6 @@ export function extractTelemetry(
     cameraMode,
     windSpeed,
     motorPower: state.motorPower,
+    speedUnit,
   };
 }
