@@ -8,13 +8,15 @@ import { PairingModal } from './components/PairingModal';
 import { ChangelogModal } from './components/ChangelogModal';
 import { MobileController } from './components/MobileController';
 import { VirtualTouchSticks } from './components/VirtualTouchSticks';
+import { LoadingOverlay } from './components/LoadingOverlay';
 import { MISSIONS, createInitialMissionProgress, getMissionById } from './sim/missions';
 import { readBrowserGamepad, type GamepadStatus } from './sim/gamepad';
 import { decodeBinaryStick } from './sim/stickProtocol';
 import { RTC_CONFIG, RTC_STICK_CHANNEL_OPTIONS } from './sim/webrtcConfig';
-import { loadSavedDroneSkin, saveDroneSkin } from './sim/droneSkins';
+import { getDroneSkinOption, loadSavedDroneSkin, saveDroneSkin } from './sim/droneSkins';
 import { loadSavedSpeedUnit, saveSpeedUnit } from './sim/speedUnit';
-import { loadSavedGraphicsMode, saveGraphicsMode } from './sim/graphicsMode';
+import { getGraphicsModeOption, loadSavedGraphicsMode, saveGraphicsMode } from './sim/graphicsMode';
+import type { LoadingOverlayState } from './sim/loadingState';
 import { detectTouchSticksDefault } from './sim/touchControls';
 import type {
   CameraMode,
@@ -92,6 +94,9 @@ export default function App() {
   const [resetNonce, setResetNonce] = useState(0);
   const [showPairing, setShowPairing] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [loadingState, setLoadingState] = useState<LoadingOverlayState | null>(() =>
+    controllerParam !== null || mobileParam === '1' ? null : { kind: 'startup' }
+  );
 
   const [controllerCount, setControllerCount] = useState(0);
   const [p2pConnected, setP2pConnected] = useState(false);
@@ -138,6 +143,15 @@ export default function App() {
     }
   }, [phase, touchSticksEnabled, hudHidden]);
 
+  // Safety fallback so a stalled asset/shader never leaves the loading screen permanently blocking UI
+  useEffect(() => {
+    if (!loadingState) return;
+    const timer = window.setTimeout(() => {
+      setLoadingState(null);
+    }, 35000);
+    return () => window.clearTimeout(timer);
+  }, [loadingState]);
+
   // Actions
   const cycleCamera = useCallback(() => {
     setCameraMode((prev) => (prev === 'chase' ? 'fpv' : 'chase'));
@@ -147,32 +161,44 @@ export default function App() {
     setFlightMode((prev) => (prev === 'normal' ? 'sport' : 'normal'));
   }, []);
 
-  const handleSelectDroneSkin = useCallback((skin: DroneSkinId) => {
-    setDroneSkin(skin);
-    saveDroneSkin(skin);
-  }, []);
+  const handleSelectDroneSkin = useCallback(
+    (skin: DroneSkinId) => {
+      if (skin === droneSkin) return;
+      setLoadingState({ kind: 'skin', detail: getDroneSkinOption(skin).name });
+      setDroneSkin(skin);
+      saveDroneSkin(skin);
+    },
+    [droneSkin]
+  );
 
   const handleSelectSpeedUnit = useCallback((unit: SpeedUnit) => {
     setSpeedUnit(unit);
     saveSpeedUnit(unit);
   }, []);
 
-  const handleSelectGraphicsMode = useCallback((mode: GraphicsMode) => {
-    setGraphicsMode(mode);
-    saveGraphicsMode(mode);
-  }, []);
+  const handleSelectGraphicsMode = useCallback(
+    (mode: GraphicsMode) => {
+      if (mode === graphicsMode) return;
+      setLoadingState({ kind: 'graphics', detail: getGraphicsModeOption(mode).label });
+      setGraphicsMode(mode);
+      saveGraphicsMode(mode);
+    },
+    [graphicsMode]
+  );
 
   const handleStartFlight = useCallback(() => {
+    setLoadingState({ kind: 'flight', detail: getMissionById(missionId).title });
     setOutcomeSnapshot(null);
     setResetNonce((n) => n + 1);
     setPhase('playing');
-  }, []);
+  }, [missionId]);
 
   const handleReset = useCallback(() => {
+    setLoadingState({ kind: 'flight', detail: getMissionById(missionId).title });
     setOutcomeSnapshot(null);
     setResetNonce((n) => n + 1);
     setPhase('playing');
-  }, []);
+  }, [missionId]);
 
   const handleTogglePause = useCallback(() => {
     setPhase((p) => (p === 'playing' ? 'paused' : p === 'paused' ? 'playing' : p));
@@ -545,6 +571,7 @@ export default function App() {
         initialRoom={controllerParam ?? ''}
         onExitToSimulator={() => {
           window.history.replaceState({}, '', window.location.pathname);
+          setLoadingState({ kind: 'startup' });
           setIsMobileView(false);
         }}
       />
@@ -584,6 +611,7 @@ export default function App() {
           onToggleMute={() => setMuted((m) => !m)}
           onTriggerReset={handleReset}
           onGamepadStatusChange={setGamepadStatus}
+          onLoadingChange={setLoadingState}
         />
       </CanvasErrorBoundary>
 
@@ -600,7 +628,7 @@ export default function App() {
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
           gamepadLabel={gamepadStatus.label}
-          modalOpen={showPairing || showChangelog}
+          modalOpen={showPairing || showChangelog || Boolean(loadingState)}
           onSelectMission={handleSelectMission}
           onSelectFlightMode={setFlightMode}
           onSelectDroneSkin={handleSelectDroneSkin}
@@ -688,6 +716,7 @@ export default function App() {
           onNextMission={() => {
             if (hasNextMission) {
               const nextMission = MISSIONS[currentIdx + 1];
+              setLoadingState({ kind: 'flight', detail: nextMission.title });
               handleSelectMission(nextMission.id);
               setPhase('playing');
             }
@@ -711,6 +740,8 @@ export default function App() {
       )}
 
       {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
+
+      <LoadingOverlay state={loadingState} />
     </main>
   );
 }

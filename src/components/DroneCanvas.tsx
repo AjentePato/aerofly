@@ -21,6 +21,9 @@ import {
 import { createCrashEffects } from '../sim/crashEffects';
 import { resolvePostArmStickGate, stepArmingState } from '../sim/arming';
 import { computeAdaptiveVerticalFov } from '../sim/touchControls';
+import { getDroneSkinOption } from '../sim/droneSkins';
+import { getGraphicsModeOption } from '../sim/graphicsMode';
+import type { LoadingOverlayState } from '../sim/loadingState';
 import type {
   CameraMode,
   DronePhysicsState,
@@ -62,6 +65,7 @@ export interface SimBridgeProps {
   onToggleMute: () => void;
   onTriggerReset: () => void;
   onGamepadStatusChange?: (status: GamepadStatus) => void;
+  onLoadingChange?: (loading: LoadingOverlayState | null) => void;
 }
 
 // Pre-allocated math helpers outside the 60Hz loop (zero GC)
@@ -115,6 +119,7 @@ export function DroneCanvas(props: SimBridgeProps) {
     } catch (err) {
       console.error('Falha ao inicializar WebGLRenderer:', err);
       setRenderError(true);
+      propsRef.current.onLoadingChange?.(null);
       return;
     }
 
@@ -138,23 +143,10 @@ export function DroneCanvas(props: SimBridgeProps) {
 
     const maxAniso = isSoftwareGl ? 1 : Math.min(8, renderer.capabilities.getMaxAnisotropy());
     let activeGraphicsMode: GraphicsMode = propsRef.current.graphicsMode;
-    let world: ReturnType<typeof buildTrainingWorld>;
     let activeDroneSkin: DroneSkinId = propsRef.current.droneSkin;
-    let droneRig: ReturnType<typeof createDroneMesh>;
-    try {
-      world = buildTrainingWorld(scene, renderer, isSoftwareGl, activeGraphicsMode);
-      droneRig = createDroneMesh(activeDroneSkin, maxAniso, activeGraphicsMode);
-    } catch (err) {
-      console.error('Falha ao construir mundo 3D:', err);
-      renderer.dispose();
-      if (renderer.domElement.parentNode === container) {
-        container.removeChild(renderer.domElement);
-      }
-      setRenderError(true);
-      return;
-    }
-    scene.add(droneRig.root);
-    scene.add(droneRig.contactShadow);
+    let world: ReturnType<typeof buildTrainingWorld> | null = null;
+    let droneRig: ReturnType<typeof createDroneMesh> | null = null;
+    let worldReady = false;
 
     const crashEffects = createCrashEffects(scene);
     const audio = new DroneAudioEngine();
@@ -189,6 +181,7 @@ export function DroneCanvas(props: SimBridgeProps) {
     const keys = new Set<string>();
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (swapScheduled || !worldReady) return;
       const code = e.code;
 
       if (propsRef.current.phase === 'playing') {
@@ -273,6 +266,9 @@ export function DroneCanvas(props: SimBridgeProps) {
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      if (worldReady && !swapScheduled && !contextLost) {
+        renderer.render(scene, camera);
+      }
     };
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
@@ -384,6 +380,12 @@ export function DroneCanvas(props: SimBridgeProps) {
     }
 
     let frameId = 0;
+    let bootRafId = 0;
+    let bootTimerId = 0;
+    let swapRafId = 0;
+    let swapTimerId = 0;
+    let finishTimerId = 0;
+    let swapScheduled = false;
     let disposed = false;
 
     function afterDraw(cb: () => void) {
@@ -413,31 +415,164 @@ export function DroneCanvas(props: SimBridgeProps) {
       crashVisualYawAnchor = 0;
       crashStartWallMs = 0;
       crashEffects.reset();
-      droneRig.propellers.forEach((p) => {
-        p.visible = true;
-      });
-      droneRig.frontLedMat.emissive.setHex(0xf59e0b);
-      droneRig.frontLedMat.emissiveIntensity = 1.2;
-      droneRig.rearLedMat.emissive.setHex(0xf59e0b);
-      droneRig.rearLedMat.emissiveIntensity = 1.2;
+      if (droneRig) {
+        droneRig.propellers.forEach((p) => {
+          p.visible = true;
+        });
+        droneRig.frontLedMat.emissive.setHex(0xf59e0b);
+        droneRig.frontLedMat.emissiveIntensity = 1.2;
+        droneRig.rearLedMat.emissive.setHex(0xf59e0b);
+        droneRig.rearLedMat.emissiveIntensity = 1.2;
+      }
       lastHudEmitTime = 0;
       camShakeTrauma = 0;
       visualChaseYaw = droneState.yaw;
       visualYawBank = 0;
     }
 
-    function tick(now = performance.now()) {
+    function scheduleNextFrame() {
       if (disposed) return;
+      if (isSoftwareGl) {
+        afterDraw(() => tick(performance.now()));
+      } else {
+        frameId = requestAnimationFrame(tick);
+      }
+    }
+
+    function applyDeferredSceneUpdates() {
+      if (disposed || !world || !droneRig) return;
+      const cur = propsRef.current;
+      const startedAt = performance.now();
+      const graphicsChanged = cur.graphicsMode !== activeGraphicsMode;
+      const skinChanged = cur.droneSkin !== activeDroneSkin;
+      const flightPrepChanged =
+        (cur.phase === 'playing' && lastPhase === 'title') ||
+        (cur.phase === 'playing' && cur.resetNonce !== lastResetNonce);
+
+      try {
+        if (graphicsChanged) {
+          world.dispose();
+          activeGraphicsMode = cur.graphicsMode;
+          world = buildTrainingWorld(scene, renderer, isSoftwareGl, activeGraphicsMode);
+        }
+
+        if (skinChanged || graphicsChanged) {
+          const prevPos = droneRig.root.position.clone();
+          const prevQuat = droneRig.root.quaternion.clone();
+          const prevVis = droneRig.root.visible;
+          const prevPropVis = droneRig.propellers.map((p) => p.visible);
+          scene.remove(droneRig.root);
+          scene.remove(droneRig.contactShadow);
+          droneRig.dispose();
+
+          activeDroneSkin = cur.droneSkin;
+          droneRig = createDroneMesh(activeDroneSkin, maxAniso, activeGraphicsMode);
+          droneRig.root.position.copy(prevPos);
+          droneRig.root.quaternion.copy(prevQuat);
+          droneRig.root.visible = prevVis;
+          droneRig.propellers.forEach((p, idx) => {
+            p.visible = prevPropVis[idx] ?? true;
+          });
+          if (crashTumble.active) {
+            droneRig.frontLedMat.emissive.setHex(0xef4444);
+            droneRig.rearLedMat.emissive.setHex(0xef4444);
+          } else if (!droneState.armed && cur.phase === 'playing') {
+            droneRig.frontLedMat.emissive.setHex(0xf59e0b);
+            droneRig.rearLedMat.emissive.setHex(0xf59e0b);
+          }
+          scene.add(droneRig.root);
+          scene.add(droneRig.contactShadow);
+        }
+
+        if (flightPrepChanged || cur.missionId !== lastMissionId || cur.resetNonce !== lastResetNonce) {
+          if (cur.phase === 'playing' && lastPhase === 'title') {
+            audio.init();
+          }
+          lastMissionId = cur.missionId;
+          lastResetNonce = cur.resetNonce;
+          lastPhase = cur.phase;
+          resetSimulation(cur.missionId);
+          droneRig.root.position.set(droneState.position.x, droneState.position.y, droneState.position.z);
+          droneRig.root.rotation.set(0, droneState.yaw, 0);
+          if (cur.phase === 'playing') {
+            camera.position.set(droneState.position.x, droneState.position.y + 1.65, droneState.position.z + 4.4);
+            camera.lookAt(droneState.position.x, droneState.position.y + 0.45, droneState.position.z - 4.2);
+          }
+        }
+
+        world.updateMissionVisuals(getMissionById(cur.missionId), missionProgress, elapsed);
+        if (cur.phase === 'title') {
+          world.hoverZoneMesh.visible = false;
+        }
+        if (!isSoftwareGl) {
+          renderer.compile(scene, camera);
+        }
+        renderer.render(scene, camera);
+      } catch (err) {
+        console.error('Falha ao atualizar cenário 3D:', err);
+        setRenderError(true);
+        propsRef.current.onLoadingChange?.(null);
+        swapScheduled = false;
+        return;
+      }
+
+      const elapsedMs = performance.now() - startedAt;
+      const minHoldMs = graphicsChanged || flightPrepChanged ? 220 : 180;
+      const remainMs = Math.max(0, minHoldMs - elapsedMs);
+
+      finishTimerId = window.setTimeout(() => {
+        if (disposed) return;
+        swapScheduled = false;
+        prevTimestamp = performance.now();
+        propsRef.current.onLoadingChange?.(null);
+        scheduleNextFrame();
+      }, remainMs);
+    }
+
+    function tick(now = performance.now()) {
+      if (disposed || !worldReady || !world || !droneRig) return;
       if (contextLost) {
         frameId = requestAnimationFrame(tick);
         return;
       }
+      if (swapScheduled) return;
+
+      const cur = propsRef.current;
+      const graphicsChanged = cur.graphicsMode !== activeGraphicsMode;
+      const skinChanged = cur.droneSkin !== activeDroneSkin;
+      const flightPrepChanged =
+        (cur.phase === 'playing' && lastPhase === 'title') ||
+        (cur.phase === 'playing' && cur.resetNonce !== lastResetNonce);
+
+      if (graphicsChanged || skinChanged || flightPrepChanged) {
+        swapScheduled = true;
+        if (graphicsChanged) {
+          cur.onLoadingChange?.({
+            kind: 'graphics',
+            detail: getGraphicsModeOption(cur.graphicsMode).label,
+          });
+        } else if (skinChanged) {
+          cur.onLoadingChange?.({
+            kind: 'skin',
+            detail: getDroneSkinOption(cur.droneSkin).name,
+          });
+        } else {
+          cur.onLoadingChange?.({
+            kind: 'flight',
+            detail: getMissionById(cur.missionId).title,
+          });
+        }
+        swapRafId = window.requestAnimationFrame(() => {
+          swapTimerId = window.setTimeout(applyDeferredSceneUpdates, 40);
+        });
+        return;
+      }
+
       const rawDt = (now - prevTimestamp) / 1000;
       prevTimestamp = now;
       const dt = Math.min(Math.max(rawDt, 0.001), 0.05);
       elapsed += dt;
 
-      const cur = propsRef.current;
       audio.setMuted(cur.muted);
 
       // Clear held keys when leaving active flight
@@ -445,16 +580,10 @@ export function DroneCanvas(props: SimBridgeProps) {
         clearKeys();
       }
 
-      // Handle mission change or explicit reset
+      // Handle mission change while staying in title/pause
       if (cur.missionId !== lastMissionId || cur.resetNonce !== lastResetNonce) {
         lastMissionId = cur.missionId;
         lastResetNonce = cur.resetNonce;
-        resetSimulation(cur.missionId);
-      }
-
-      // When transitioning from title -> playing, ensure clean spawn & audio init
-      if (cur.phase === 'playing' && lastPhase === 'title') {
-        audio.init();
         resetSimulation(cur.missionId);
       }
       lastPhase = cur.phase;
@@ -476,43 +605,6 @@ export function DroneCanvas(props: SimBridgeProps) {
       emitGamepadIfChanged(gpSample.status);
       let activeSticks: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
 
-      // Live swap world graphics mode (Low-Poly vs Realistic) without tearing down WebGL or resetting flight
-      const graphicsChanged = cur.graphicsMode !== activeGraphicsMode;
-      if (graphicsChanged) {
-        world.dispose();
-        activeGraphicsMode = cur.graphicsMode;
-        world = buildTrainingWorld(scene, renderer, isSoftwareGl, activeGraphicsMode);
-      }
-
-      // Live swap drone model/texture or graphics fidelity without resetting flight
-      if (cur.droneSkin !== activeDroneSkin || graphicsChanged) {
-        const prevPos = droneRig.root.position.clone();
-        const prevQuat = droneRig.root.quaternion.clone();
-        const prevVis = droneRig.root.visible;
-        const prevPropVis = droneRig.propellers.map((p) => p.visible);
-        scene.remove(droneRig.root);
-        scene.remove(droneRig.contactShadow);
-        droneRig.dispose();
-
-        activeDroneSkin = cur.droneSkin;
-        droneRig = createDroneMesh(activeDroneSkin, maxAniso, activeGraphicsMode);
-        droneRig.root.position.copy(prevPos);
-        droneRig.root.quaternion.copy(prevQuat);
-        droneRig.root.visible = prevVis;
-        droneRig.propellers.forEach((p, idx) => {
-          p.visible = prevPropVis[idx] ?? true;
-        });
-        if (crashTumble.active) {
-          droneRig.frontLedMat.emissive.setHex(0xef4444);
-          droneRig.rearLedMat.emissive.setHex(0xef4444);
-        } else if (!droneState.armed && cur.phase === 'playing') {
-          droneRig.frontLedMat.emissive.setHex(0xf59e0b);
-          droneRig.rearLedMat.emissive.setHex(0xf59e0b);
-        }
-        scene.add(droneRig.root);
-        scene.add(droneRig.contactShadow);
-      }
-
       if (cur.phase === 'title') {
         // Title screen: Live orbital camera tour around the sunlit airfield & hovering drone
         droneRig.frontLedMat.emissive.setHex(0x38bdf8);
@@ -532,9 +624,10 @@ export function DroneCanvas(props: SimBridgeProps) {
         droneRig.contactShadow.scale.setScalar(0.65);
 
         propAngle += dt * (cur.showcaseDrone ? 18 : 42);
-        droneRig.propellers.forEach((p, idx) => {
+        const titleRig = droneRig;
+        titleRig.propellers.forEach((p, idx) => {
           p.rotation.y = propAngle * (idx % 2 === 0 ? 1 : -1);
-          droneRig.propBlurDiscs[idx].visible = !cur.showcaseDrone;
+          titleRig.propBlurDiscs[idx].visible = !cur.showcaseDrone;
         });
 
         if (cur.showcaseDrone) {
@@ -706,10 +799,11 @@ export function DroneCanvas(props: SimBridgeProps) {
         const rpmScale = droneState.armed && !crashTumble.active ? 14 + droneState.motorPower * 65 : 0;
         propAngle += dt * rpmScale;
         const showBlur = droneState.armed && !crashTumble.active && droneState.motorPower > 0.1;
-        droneRig.propellers.forEach((p, idx) => {
+        const activeRig = droneRig;
+        activeRig.propellers.forEach((p, idx) => {
           const dir = (p.userData.spinDir as number) || 1;
           p.rotation.y = propAngle * dir;
-          droneRig.propBlurDiscs[idx].visible = showBlur && p.visible;
+          activeRig.propBlurDiscs[idx].visible = showBlur && p.visible;
         });
 
         // Contact shadow tracking ground below drone
@@ -851,20 +945,63 @@ export function DroneCanvas(props: SimBridgeProps) {
       }
 
       renderer.render(scene, camera);
-
-      if (isSoftwareGl) {
-        afterDraw(() => tick(performance.now()));
-      } else {
-        frameId = requestAnimationFrame(tick);
-      }
+      scheduleNextFrame();
     }
 
-    frameId = requestAnimationFrame(tick);
+    // Yield one animation frame so LoadingOverlay paints immediately before heavy 3D scene/shader compilation
+    if (canvasRetryNonce > 0) {
+      propsRef.current.onLoadingChange?.({ kind: 'startup' });
+    }
+    bootRafId = window.requestAnimationFrame(() => {
+      bootTimerId = window.setTimeout(() => {
+        if (disposed) return;
+        const bootStart = performance.now();
+        try {
+          world = buildTrainingWorld(scene, renderer, isSoftwareGl, activeGraphicsMode);
+          droneRig = createDroneMesh(activeDroneSkin, maxAniso, activeGraphicsMode);
+          scene.add(droneRig.root);
+          scene.add(droneRig.contactShadow);
+
+          const cur = propsRef.current;
+          world.updateMissionVisuals(getMissionById(cur.missionId), missionProgress, elapsed);
+          if (cur.phase === 'title') {
+            world.hoverZoneMesh.visible = false;
+            droneRig.root.position.set(0, 3.2, 0);
+          } else {
+            droneRig.root.position.set(droneState.position.x, droneState.position.y, droneState.position.z);
+          }
+          if (!isSoftwareGl) {
+            renderer.compile(scene, camera);
+          }
+          renderer.render(scene, camera);
+          worldReady = true;
+        } catch (err) {
+          console.error('Falha ao construir mundo 3D:', err);
+          setRenderError(true);
+          propsRef.current.onLoadingChange?.(null);
+          return;
+        }
+
+        const bootElapsed = performance.now() - bootStart;
+        const holdMs = Math.max(0, 260 - bootElapsed);
+        finishTimerId = window.setTimeout(() => {
+          if (disposed) return;
+          prevTimestamp = performance.now();
+          propsRef.current.onLoadingChange?.(null);
+          scheduleNextFrame();
+        }, holdMs);
+      }, 30);
+    });
 
     return () => {
       disposed = true;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
+      cancelAnimationFrame(bootRafId);
+      clearTimeout(bootTimerId);
+      cancelAnimationFrame(swapRafId);
+      clearTimeout(swapTimerId);
+      clearTimeout(finishTimerId);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', clearKeys);
@@ -878,8 +1015,8 @@ export function DroneCanvas(props: SimBridgeProps) {
       renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
       audio.dispose();
       crashEffects.dispose();
-      droneRig.dispose();
-      world.dispose();
+      droneRig?.dispose();
+      world?.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);

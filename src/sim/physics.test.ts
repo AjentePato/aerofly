@@ -57,6 +57,7 @@ import {
   shouldEnableTouchSticksByDefault,
 } from './touchControls';
 import { DEFAULT_SPEED_UNIT, formatSpeed, isValidSpeedUnit } from './speedUnit';
+import { getLoadingCopy } from './loadingState';
 import type { PhysicsConfig, StickInput } from './types';
 
 const neutralInput: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
@@ -810,4 +811,22 @@ test('graphics mode options support Low-Poly (Antiga) and Realista (Atual) with 
   assert.equal(isValidGraphicsMode('ultra'), false);
   assert.equal(getGraphicsModeOption('low_poly').label, 'Low-Poly (Antiga)');
   assert.equal(getGraphicsModeOption('realistic').label, 'Realista (Atual)');
+});
+
+test('loading overlay copy provides localized Portuguese messages for all transition kinds', () => {
+  const startup = getLoadingCopy('startup');
+  assert.equal(startup.badge, 'INICIALIZANDO');
+  assert.ok(startup.title.includes('Simulador 3D'));
+
+  const flight = getLoadingCopy('flight', 'Circuito dos Portões');
+  assert.equal(flight.badge, 'DECOLAGEM');
+  assert.ok(flight.title.includes('Missão'));
+
+  const skin = getLoadingCopy('skin', 'Drone Branco Moderno');
+  assert.equal(skin.badge, 'TEXTURA DO DRONE');
+  assert.ok(skin.subtitle.includes('Drone Branco Moderno'));
+
+  const graphics = getLoadingCopy('graphics', 'Low-Poly (Antiga)');
+  assert.equal(graphics.badge, 'GRÁFICOS DO JOGO');
+  assert.ok(graphics.subtitle.includes('Low-Poly (Antiga)'));
 });
