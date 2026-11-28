@@ -26,15 +26,40 @@ export interface ChangelogEntry {
 
 export const CHANGELOG_ENTRIES: ChangelogEntry[] = [
   {
-    version: 'V2.2',
-    title: 'Seletor de Gráficos (Low-Poly e Realista) e Ajustes Visuais do Cenário',
+    version: 'V2.3',
+    title: 'Controle Completo nos Menus, Atalhos de Voo e Vibração Tátil',
     summary:
-      'Adicionada a opção nas Configurações para escolher entre o visual clássico Low-Poly (Antiga) e o visual Realista (Atual), além de correções na água do lago e nos reflexos do terreno.',
+      'Agora é possível controlar todo o simulador usando apenas um controle de PS4 (via DS4Windows) ou Xbox, com navegação completa em menus, atalhos em voo e resposta por vibração.',
     kind: 'feature',
     changes: [
       {
         category: 'Novo',
-        text: 'Nova opção nas Configurações (menu inicial e pausa) para trocar os gráficos entre Low-Poly (Antiga) e Realista (Atual) a qualquer momento.',
+        text: 'Navegação completa pelo controle em todas as telas: use as setinhas (D-Pad) ou o analógico esquerdo para escolher missões, modos de voo, texturas, configurações e janelas, A / ✕ para confirmar e B / ○ para voltar.',
+      },
+      {
+        category: 'Novo',
+        text: 'Troca rápida de abas e filtros com LB / RB (L1 / R1) no menu inicial, pausa e novidades, além de rolagem de listas pelo analógico direito.',
+      },
+      {
+        category: 'Novo',
+        text: 'Vibração tátil (feedback háptico) no controle ao navegar, confirmar botões, ligar os motores, atravessar portões, pousar com força ou bater — com opção para ligar, desligar e testar a vibração nas Configurações.',
+      },
+      {
+        category: 'Melhoria',
+        text: 'Atalhos práticos durante o voo pelo controle (Start/Options para pausar, Y / △ câmera, X / □ modo GPS/Sport, LB som, RB ocultar HUD e Back/Share reiniciar) com aviso visual na tela.',
+      },
+    ],
+  },
+  {
+    version: 'V2.2',
+    title: 'Seletor de Gráficos (Low-Poly e Realista) e Ajustes Visuais do Cenário',
+    summary:
+      'Adicionada a opção nas Configurações para escolher entre o visual clássico Low-Poly (Clássica) e o visual Realista (Nova), além de correções na água do lago e nos reflexos do terreno.',
+    kind: 'feature',
+    changes: [
+      {
+        category: 'Novo',
+        text: 'Nova opção nas Configurações (menu inicial e pausa) para trocar os gráficos entre Low-Poly (Clássica) e Realista (Nova) a qualquer momento.',
       },
       {
         category: 'Correção',

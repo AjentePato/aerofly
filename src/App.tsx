@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DroneCanvas } from './components/DroneCanvas';
 import { CanvasErrorBoundary } from './components/CanvasErrorBoundary';
-import { TitleOverlay } from './components/TitleOverlay';
+import { TitleOverlay, type TitleTabId } from './components/TitleOverlay';
 import { FlightHUD } from './components/FlightHUD';
-import { OutcomeModal, PauseModal } from './components/Modals';
+import { OutcomeModal, PauseModal, type PauseTabId } from './components/Modals';
 import { PairingModal } from './components/PairingModal';
 import { ChangelogModal } from './components/ChangelogModal';
 import { MobileController } from './components/MobileController';
 import { VirtualTouchSticks } from './components/VirtualTouchSticks';
 import { LoadingOverlay } from './components/LoadingOverlay';
 import { MISSIONS, createInitialMissionProgress, getMissionById } from './sim/missions';
-import { readBrowserGamepad, type GamepadStatus } from './sim/gamepad';
+import {
+  loadSavedRumbleEnabled,
+  readBrowserGamepad,
+  saveRumbleEnabled,
+  triggerGamepadRumble,
+  type GamepadStatus,
+} from './sim/gamepad';
+import type { ChangelogFilter } from './sim/changelog';
 import { decodeBinaryStick } from './sim/stickProtocol';
 import { RTC_CONFIG, RTC_STICK_CHANNEL_OPTIONS } from './sim/webrtcConfig';
 import { getDroneSkinOption, loadSavedDroneSkin, saveDroneSkin } from './sim/droneSkins';
@@ -18,6 +25,7 @@ import { loadSavedSpeedUnit, saveSpeedUnit } from './sim/speedUnit';
 import { getGraphicsModeOption, loadSavedGraphicsMode, saveGraphicsMode } from './sim/graphicsMode';
 import type { LoadingOverlayState } from './sim/loadingState';
 import { detectTouchSticksDefault } from './sim/touchControls';
+import { useGamepadUI } from './hooks/useGamepadUI';
 import type {
   CameraMode,
   DronePhysicsState,
@@ -89,11 +97,15 @@ export default function App() {
   const [showcaseDrone, setShowcaseDrone] = useState(false);
   const [windEnabled, setWindEnabled] = useState(false);
   const [muted, setMuted] = useState(false);
+  const [rumbleEnabled, setRumbleEnabled] = useState<boolean>(() => loadSavedRumbleEnabled());
   const [touchSticksEnabled, setTouchSticksEnabled] = useState<boolean>(() => detectTouchSticksDefault());
   const [hudHidden, setHudHidden] = useState(false);
   const [resetNonce, setResetNonce] = useState(0);
   const [showPairing, setShowPairing] = useState(false);
   const [showChangelog, setShowChangelog] = useState(false);
+  const [titleTab, setTitleTab] = useState<TitleTabId>('missions');
+  const [pauseTab, setPauseTab] = useState<PauseTabId>('flight');
+  const [changelogFilter, setChangelogFilter] = useState<ChangelogFilter>('all');
   const [loadingState, setLoadingState] = useState<LoadingOverlayState | null>(() =>
     controllerParam !== null || mobileParam === '1' ? null : { kind: 'startup' }
   );
@@ -208,9 +220,91 @@ export default function App() {
     setHudHidden((prev) => !prev);
   }, []);
 
+  const handleToggleRumble = useCallback(() => {
+    setRumbleEnabled((prev) => {
+      const next = !prev;
+      saveRumbleEnabled(next);
+      if (next) {
+        triggerGamepadRumble('click', true);
+      }
+      return next;
+    });
+  }, []);
+
   const handleVirtualArmHoldChange = useCallback((holding: boolean) => {
     virtualArmHoldRef.current = holding;
   }, []);
+
+  const handleCloseTopModal = useCallback(() => {
+    if (showPairing) setShowPairing(false);
+    else if (showChangelog) setShowChangelog(false);
+  }, [showPairing, showChangelog]);
+
+  const handleCycleActiveTab = useCallback(
+    (dir: -1 | 1) => {
+      if (showChangelog) {
+        const filters: ChangelogFilter[] = ['all', 'features', 'fixes'];
+        setChangelogFilter((prev) => {
+          const idx = filters.indexOf(prev);
+          return filters[(idx + dir + filters.length) % filters.length];
+        });
+        return;
+      }
+      if (showPairing) return;
+      if (phase === 'title') {
+        const tabs: TitleTabId[] = ['missions', 'texture', 'settings'];
+        setTitleTab((prev) => {
+          const idx = tabs.indexOf(prev);
+          return tabs[(idx + dir + tabs.length) % tabs.length];
+        });
+      } else if (phase === 'paused') {
+        const tabs: PauseTabId[] = ['flight', 'texture', 'settings'];
+        setPauseTab((prev) => {
+          const idx = tabs.indexOf(prev);
+          return tabs[(idx + dir + tabs.length) % tabs.length];
+        });
+      }
+    },
+    [phase, showChangelog, showPairing]
+  );
+
+  const handleGamepadQuickStart = useCallback(() => {
+    if (phase === 'title') {
+      handleStartFlight();
+    } else if (phase === 'gameover') {
+      const primary = document.querySelector<HTMLElement>(
+        '[data-gamepad-root="outcome"] [data-start="true"]'
+      );
+      if (primary) {
+        primary.click();
+      } else {
+        handleReset();
+      }
+    }
+  }, [phase, handleStartFlight, handleReset]);
+
+  const { actionFeedback: gamepadFeedback, notifyActionFeedback } = useGamepadUI({
+    active: !isMobileView && !loadingState,
+    phase,
+    modalOpen: showPairing || showChangelog,
+    gamepadConnected: gamepadStatus.connected,
+    rumbleEnabled,
+    onCloseTopModal: handleCloseTopModal,
+    onCycleTab: handleCycleActiveTab,
+    onQuickStart: handleGamepadQuickStart,
+    onToggleWind: () => setWindEnabled((w) => !w),
+    onTogglePause: handleTogglePause,
+    onCycleCamera: cycleCamera,
+    onCycleFlightMode: cycleFlightMode,
+    onToggleMute: () => setMuted((m) => !m),
+    onToggleHud: handleToggleHud,
+    onRestart: handleReset,
+  });
+
+  const handleTestRumble = useCallback(() => {
+    const fired = triggerGamepadRumble('test', rumbleEnabled);
+    notifyActionFeedback(fired ? 'Vibração Testada!' : 'Sem Controle Conectado');
+  }, [rumbleEnabled, notifyActionFeedback]);
 
   // Refs so incoming WS/WebRTC events never force effect teardown or trigger 50Hz React renders
   const latestTelemetryRef = useRef(telemetry);
@@ -595,6 +689,7 @@ export default function App() {
           showcaseDrone={phase === 'title' && showcaseDrone}
           windEnabled={windEnabled}
           muted={muted}
+          rumbleEnabled={rumbleEnabled}
           remoteStickRef={remoteStickRef}
           remoteActiveRef={remoteActiveRef}
           touchStickRef={touchStickRef}
@@ -624,11 +719,15 @@ export default function App() {
           graphicsMode={graphicsMode}
           windEnabled={windEnabled}
           muted={muted}
+          rumbleEnabled={rumbleEnabled}
           touchSticksEnabled={touchSticksEnabled}
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
           gamepadLabel={gamepadStatus.label}
+          gamepadFeedback={gamepadFeedback}
+          activeTab={titleTab}
           modalOpen={showPairing || showChangelog || Boolean(loadingState)}
+          onChangeTab={setTitleTab}
           onSelectMission={handleSelectMission}
           onSelectFlightMode={setFlightMode}
           onSelectDroneSkin={handleSelectDroneSkin}
@@ -637,6 +736,8 @@ export default function App() {
           onShowcaseChange={setShowcaseDrone}
           onToggleWind={() => setWindEnabled((w) => !w)}
           onToggleMute={() => setMuted((m) => !m)}
+          onToggleRumble={handleToggleRumble}
+          onTestRumble={handleTestRumble}
           onToggleTouchSticks={() => setTouchSticksEnabled((v) => !v)}
           onStartFlight={handleStartFlight}
           onOpenPairing={() => setShowPairing(true)}
@@ -660,6 +761,7 @@ export default function App() {
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
           gamepadLabel={gamepadStatus.label}
+          gamepadFeedback={gamepadFeedback}
           onCycleCamera={cycleCamera}
           onToggleMute={() => setMuted((m) => !m)}
           onTogglePause={handleTogglePause}
@@ -681,11 +783,15 @@ export default function App() {
           graphicsMode={graphicsMode}
           windEnabled={windEnabled}
           muted={muted}
+          rumbleEnabled={rumbleEnabled}
           touchSticksEnabled={touchSticksEnabled}
           hudHidden={hudHidden}
           controllerConnected={controllerCount > 0}
           gamepadConnected={gamepadStatus.connected}
           gamepadLabel={gamepadStatus.label}
+          gamepadFeedback={gamepadFeedback}
+          pauseTab={pauseTab}
+          onChangePauseTab={setPauseTab}
           onResume={() => setPhase('playing')}
           onRestart={handleReset}
           onReturnTitle={() => {
@@ -700,6 +806,8 @@ export default function App() {
           onSelectGraphicsMode={handleSelectGraphicsMode}
           onToggleWind={() => setWindEnabled((w) => !w)}
           onToggleMute={() => setMuted((m) => !m)}
+          onToggleRumble={handleToggleRumble}
+          onTestRumble={handleTestRumble}
           onToggleTouchSticks={() => setTouchSticksEnabled((v) => !v)}
           onToggleHud={handleToggleHud}
           onOpenPairing={() => setShowPairing(true)}
@@ -739,7 +847,13 @@ export default function App() {
         />
       )}
 
-      {showChangelog && <ChangelogModal onClose={() => setShowChangelog(false)} />}
+      {showChangelog && (
+        <ChangelogModal
+          filter={changelogFilter}
+          onChangeFilter={setChangelogFilter}
+          onClose={() => setShowChangelog(false)}
+        />
+      )}
 
       <LoadingOverlay state={loadingState} />
     </main>

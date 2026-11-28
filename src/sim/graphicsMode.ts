@@ -12,12 +12,12 @@ export interface GraphicsModeOption {
 export const GRAPHICS_MODE_OPTIONS: ReadonlyArray<GraphicsModeOption> = [
   {
     id: 'low_poly',
-    label: 'Low-Poly (Antiga)',
+    label: 'Low-Poly (Clássica)',
     description: 'Visual clássico leve com cores vibrantes e formas geométricas simples.',
   },
   {
     id: 'realistic',
-    label: 'Realista (Atual)',
+    label: 'Realista (Nova)',
     description: 'Texturas detalhadas, água animada, iluminação natural e vegetação realista.',
   },
 ];

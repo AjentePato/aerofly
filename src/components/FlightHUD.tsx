@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { getMissionById } from '../sim/missions';
 import { formatSpeed } from '../sim/speedUnit';
+import type { GamepadActionFeedback } from '../hooks/useGamepadUI';
 import type {
   CameraMode,
   DroneTelemetry,
@@ -35,6 +36,7 @@ interface FlightHUDProps {
   controllerConnected: boolean;
   gamepadConnected: boolean;
   gamepadLabel?: string;
+  gamepadFeedback?: GamepadActionFeedback | null;
   onCycleCamera: () => void;
   onToggleMute: () => void;
   onTogglePause: () => void;
@@ -82,6 +84,7 @@ export function FlightHUD({
   controllerConnected,
   gamepadConnected,
   gamepadLabel,
+  gamepadFeedback,
   onCycleCamera,
   onToggleMute,
   onTogglePause,
@@ -242,13 +245,22 @@ export function FlightHUD({
           {gamepadConnected && (
             <div
               data-testid="hud-gamepad-status"
-              title={`${gamepadLabel || 'Controle Xbox / DS4'} — Sticks Modo 2 ativos`}
+              title={`${gamepadLabel || 'Controle Xbox / DS4'} — Sticks Modo 2 + Atalhos ativos`}
               aria-label="Controle Xbox ou DS4 conectado"
-              className="h-10 px-3 rounded-lg border border-emerald-500/45 text-xs font-medium text-emerald-200 flex items-center gap-2 whitespace-nowrap"
+              className={`h-10 px-3 rounded-lg border text-xs font-medium flex items-center gap-2 whitespace-nowrap transition-colors ${
+                gamepadFeedback
+                  ? 'border-amber-400 text-amber-200'
+                  : 'border-emerald-500/45 text-emerald-200'
+              }`}
               style={{ backgroundColor: 'rgba(8, 13, 24, 0.85)' }}
             >
-              <Gamepad2 className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
-              <span className="hidden sm:inline">Xbox / DS4</span>
+              <Gamepad2
+                className={`w-4 h-4 shrink-0 ${gamepadFeedback ? 'text-amber-400' : 'text-emerald-400'}`}
+                aria-hidden="true"
+              />
+              <span className="hidden sm:inline">
+                {gamepadFeedback ? gamepadFeedback.label : 'Xbox / DS4'}
+              </span>
             </div>
           )}
 
@@ -488,12 +500,23 @@ export function FlightHUD({
       <div className="flex items-end justify-between gap-4">
         {/* Left Stick + Right Stick Visualizers (hidden when on-screen touch sticks are active) */}
         {!touchSticksEnabled && (
-          <div
-            className="hidden sm:flex items-center gap-3 rounded-lg px-3 py-2 border border-slate-700/80"
-            style={{ backgroundColor: 'rgba(8, 13, 24, 0.82)' }}
-          >
-            <StickMiniPreview x={sticks.yaw} y={sticks.throttle} label="THR / YAW" />
-            <StickMiniPreview x={sticks.roll} y={sticks.pitch} label="PIT / ROL" />
+          <div className="hidden sm:flex flex-col gap-1.5">
+            <div
+              className="flex items-center gap-3 rounded-lg px-3 py-2 border border-slate-700/80"
+              style={{ backgroundColor: 'rgba(8, 13, 24, 0.82)' }}
+            >
+              <StickMiniPreview x={sticks.yaw} y={sticks.throttle} label="THR / YAW" />
+              <StickMiniPreview x={sticks.roll} y={sticks.pitch} label="PIT / ROL" />
+            </div>
+            {gamepadConnected && (
+              <div
+                data-testid="hud-gamepad-shortcuts"
+                className="text-[10px] text-slate-200 px-2.5 py-1 rounded border border-slate-700/70 whitespace-nowrap"
+                style={{ backgroundColor: 'rgba(8, 13, 24, 0.78)' }}
+              >
+                Start Pausa · Y/△ Câm · X/□ Modo · LB Som · RB HUD · Back Reiniciar
+              </div>
+            )}
           </div>
         )}
 

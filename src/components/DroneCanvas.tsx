@@ -11,7 +11,7 @@ import {
 } from '../sim/physics';
 import { createInitialMissionProgress, evaluateMissionStep, getMissionById } from '../sim/missions';
 import { DroneAudioEngine } from '../sim/audio';
-import { readBrowserGamepad, type GamepadStatus } from '../sim/gamepad';
+import { readBrowserGamepad, triggerGamepadRumble, type GamepadStatus } from '../sim/gamepad';
 import {
   createIdleCrashTumble,
   initCrashTumble,
@@ -49,6 +49,7 @@ export interface SimBridgeProps {
   showcaseDrone?: boolean;
   windEnabled: boolean;
   muted: boolean;
+  rumbleEnabled?: boolean;
   remoteStickRef: React.MutableRefObject<StickInput>;
   remoteActiveRef: React.MutableRefObject<boolean>;
   touchStickRef: React.MutableRefObject<StickInput>;
@@ -171,6 +172,8 @@ export function DroneCanvas(props: SimBridgeProps) {
     let turbineAngle = 0;
     let visualChaseYaw = 0;
     let visualYawBank = 0;
+    let lastArmRumbleMs = 0;
+    let lastBumpRumbleMs = 0;
 
     // Initialize camera behind spawn helipad facing the radio tower & gates
     _camDesiredPos.set(0, 2.8, 5.2);
@@ -675,9 +678,14 @@ export function DroneCanvas(props: SimBridgeProps) {
             armDt
           );
           armingProgress = armRes.armingProgress;
+          if (!droneState.armed && armingProgress > 0.04 && now - lastArmRumbleMs >= 160) {
+            lastArmRumbleMs = now;
+            triggerGamepadRumble('arming', cur.rumbleEnabled !== false, 0.45 + armingProgress * 0.65);
+          }
           if (armRes.justArmed) {
             droneState.armed = true;
             audio.playArmChime();
+            triggerGamepadRumble('armed', cur.rumbleEnabled !== false);
             lastHudEmitTime = 0;
           }
 
@@ -711,6 +719,7 @@ export function DroneCanvas(props: SimBridgeProps) {
             droneRig.rearLedMat.emissiveIntensity = 2.2;
           }
 
+          const prevStateForImpact = droneState;
           droneState = stepDronePhysics(
             droneState,
             flightSticks,
@@ -723,9 +732,11 @@ export function DroneCanvas(props: SimBridgeProps) {
 
           if (stepRes.event === 'gate_passed') {
             audio.playGateChime();
+            triggerGamepadRumble('gate', cur.rumbleEnabled !== false);
             camShakeTrauma = Math.min(1, camShakeTrauma + 0.18);
           } else if (stepRes.event === 'completed') {
             audio.playSuccessFanfare();
+            triggerGamepadRumble('victory', cur.rumbleEnabled !== false);
             cur.onMissionComplete(missionProgress, droneState);
           } else if (stepRes.event === 'crashed') {
             const started = initCrashTumble(droneState);
@@ -737,6 +748,7 @@ export function DroneCanvas(props: SimBridgeProps) {
             crashEffects.trigger(crashTumble.impactPos, droneState.velocity, crashTumble.brokenProps);
             audio.updateMotors(0, false, 0);
             audio.playCrashThud();
+            triggerGamepadRumble('crash', cur.rumbleEnabled !== false);
             camShakeTrauma = 1.0;
 
             droneRig.propellers.forEach((p, idx) => {
@@ -747,13 +759,30 @@ export function DroneCanvas(props: SimBridgeProps) {
             });
             droneRig.frontLedMat.emissive.setHex(0xef4444);
             droneRig.rearLedMat.emissive.setHex(0xef4444);
+          } else if (droneState.armed && now - lastBumpRumbleMs >= 180) {
+            const hardTouchdown =
+              !prevStateForImpact.onGround &&
+              droneState.onGround &&
+              prevStateForImpact.velocity.y < -1.6;
+            const dvx = droneState.velocity.x - prevStateForImpact.velocity.x;
+            const dvz = droneState.velocity.z - prevStateForImpact.velocity.z;
+            const horizImpulse = Math.hypot(dvx, dvz);
+            if (hardTouchdown || horizImpulse > 2.8) {
+              lastBumpRumbleMs = now;
+              const strength = hardTouchdown
+                ? Math.min(1.1, Math.abs(prevStateForImpact.velocity.y) / 4.2)
+                : Math.min(1.1, horizImpulse / 5.5);
+              triggerGamepadRumble('bump', cur.rumbleEnabled !== false, Math.max(0.4, strength));
+            }
           }
         } else {
           const tumbleStep = stepCrashTumble(droneState, crashTumble, dt);
           droneState = tumbleStep.drone;
           crashTumble = tumbleStep.tumble;
           if (tumbleStep.groundImpactSpeed > 1.2) {
-            audio.playSecondaryBounce(Math.min(1, tumbleStep.groundImpactSpeed / 6));
+            const impactScale = Math.min(1, tumbleStep.groundImpactSpeed / 6);
+            audio.playSecondaryBounce(impactScale);
+            triggerGamepadRumble('bump', cur.rumbleEnabled !== false, impactScale);
             camShakeTrauma = Math.min(1, camShakeTrauma + 0.35);
           }
 

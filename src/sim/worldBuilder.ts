@@ -266,6 +266,24 @@ function createTurbineBladeGeometry(): THREE.BufferGeometry {
 }
 
 /**
+ * Builds the aerodynamic wind turbine spinner cone with base-to-tip LatheGeometry winding
+ * so all outer face normals point outward and forward (+Z after X rotation).
+ */
+export function createTurbineSpinnerGeometry(): THREE.BufferGeometry {
+  const pts: THREE.Vector2[] = [new THREE.Vector2(0.004, 0)];
+  const steps = 12;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const r = i === steps ? 0.004 : Math.max(0.004, Math.cos(t * Math.PI * 0.5) * 0.88);
+    pts.push(new THREE.Vector2(r, 1.84 * t));
+  }
+  const geo = new THREE.LatheGeometry(pts, 24);
+  geo.rotateX(Math.PI / 2);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
  * Holographic targeting reticle shader inside mission gates (concentric dashed ring + corner brackets + Fresnel).
  */
 function createGateReticleMaterial(): THREE.ShaderMaterial {
@@ -1035,18 +1053,11 @@ export function buildTrainingWorld(
         })
       );
 
-  // Smooth aerodynamic spinner cone via LatheGeometry
-  const spinnerPts: THREE.Vector2[] = [];
-  for (let i = 0; i <= 10; i++) {
-    const t = i / 10;
-    const r = Math.sin(t * Math.PI * 0.5) * 0.78;
-    spinnerPts.push(new THREE.Vector2(r, 1.35 * (1 - t)));
-  }
-  const spinnerGeo = track(new THREE.LatheGeometry(spinnerPts, 20));
-  spinnerGeo.rotateX(Math.PI / 2);
+  // Smooth aerodynamic spinner cone via LatheGeometry (outward base-to-tip winding)
+  const spinnerGeo = track(createTurbineSpinnerGeometry());
 
   const airfoilBladeGeo = track(createTurbineBladeGeometry());
-  const nacelleBodyGeo = track(new THREE.CapsuleGeometry(0.86, 2.35, 8, 18));
+  const nacelleBodyGeo = track(new THREE.CapsuleGeometry(0.82, 2.55, 8, 18));
   nacelleBodyGeo.rotateX(Math.PI / 2);
 
   for (const wt of WIND_TURBINES) {
@@ -1067,7 +1078,7 @@ export function buildTrainingWorld(
     tGroup.add(mastMesh);
 
     const nacelle = new THREE.Mesh(nacelleBodyGeo, nacelleMat);
-    nacelle.position.set(0, 28.2, 0.35);
+    nacelle.position.set(0, 28.2, 0.38);
     nacelle.castShadow = true;
     tGroup.add(nacelle);
 
@@ -1075,7 +1086,7 @@ export function buildTrainingWorld(
     rotor.position.set(0, 28.2, 2.32);
 
     const nose = new THREE.Mesh(spinnerGeo, turbineMat);
-    nose.position.z = 0.06;
+    nose.position.z = -0.45;
     nose.castShadow = true;
     rotor.add(nose);
 

@@ -56,6 +56,7 @@ export function PairingModal({
 
   return (
     <div
+      data-gamepad-root="pairing"
       className="fixed inset-0 z-40 flex items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(6, 10, 18, 0.84)' }}
       role="dialog"
@@ -83,6 +84,7 @@ export function PairingModal({
 
           <button
             type="button"
+            data-gamepad-default="true"
             onClick={onClose}
             aria-label="Fechar janela de pareamento"
             className="w-9 h-9 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 cursor-pointer"
@@ -186,6 +188,9 @@ export function PairingModal({
             <span>PIT {Math.round(remoteSticks.pitch * 100)}%</span>
             <span>ROL {Math.round(remoteSticks.roll * 100)}%</span>
           </div>
+        </div>
+        <div className="text-[10px] text-slate-400 text-center">
+          Controle Xbox/PS4: D-Pad Navegar · A/✕ Selecionar · B/○ Fechar
         </div>
       </div>
     </div>

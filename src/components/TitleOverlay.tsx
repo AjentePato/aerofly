@@ -1,11 +1,29 @@
-import { useEffect, useState } from 'react';
-import { Gamepad2, Gauge, Monitor, Palette, Play, Settings, Smartphone, Sparkles, Target, Touchpad, Volume2, VolumeX, Wind } from 'lucide-react';
+import { useEffect } from 'react';
+import {
+  Gamepad2,
+  Gauge,
+  Monitor,
+  Palette,
+  Play,
+  Settings,
+  Smartphone,
+  Sparkles,
+  Target,
+  Touchpad,
+  Vibrate,
+  Volume2,
+  VolumeX,
+  Wind,
+} from 'lucide-react';
 import { MISSIONS } from '../sim/missions';
 import { GAME_VERSION } from '../sim/changelog';
 import { getDroneSkinOption } from '../sim/droneSkins';
 import { GRAPHICS_MODE_OPTIONS, getGraphicsModeOption } from '../sim/graphicsMode';
 import { DroneSkinSelector } from './DroneSkinSelector';
+import type { GamepadActionFeedback } from '../hooks/useGamepadUI';
 import type { DroneSkinId, FlightMode, GraphicsMode, MissionId, SpeedUnit } from '../sim/types';
+
+export type TitleTabId = 'missions' | 'texture' | 'settings';
 
 interface TitleOverlayProps {
   selectedMission: MissionId;
@@ -15,11 +33,15 @@ interface TitleOverlayProps {
   graphicsMode: GraphicsMode;
   windEnabled: boolean;
   muted: boolean;
+  rumbleEnabled?: boolean;
   touchSticksEnabled?: boolean;
   controllerConnected: boolean;
   gamepadConnected: boolean;
   gamepadLabel?: string;
+  gamepadFeedback?: GamepadActionFeedback | null;
+  activeTab: TitleTabId;
   modalOpen?: boolean;
+  onChangeTab: (tab: TitleTabId) => void;
   onSelectMission: (id: MissionId) => void;
   onSelectFlightMode: (mode: FlightMode) => void;
   onSelectDroneSkin: (skin: DroneSkinId) => void;
@@ -28,6 +50,8 @@ interface TitleOverlayProps {
   onShowcaseChange?: (active: boolean) => void;
   onToggleWind: () => void;
   onToggleMute: () => void;
+  onToggleRumble?: () => void;
+  onTestRumble?: () => void;
   onToggleTouchSticks: () => void;
   onStartFlight: () => void;
   onOpenPairing: () => void;
@@ -47,11 +71,15 @@ export function TitleOverlay({
   graphicsMode,
   windEnabled,
   muted,
+  rumbleEnabled = true,
   touchSticksEnabled = false,
   controllerConnected,
   gamepadConnected,
   gamepadLabel,
+  gamepadFeedback,
+  activeTab,
   modalOpen = false,
+  onChangeTab,
   onSelectMission,
   onSelectFlightMode,
   onSelectDroneSkin,
@@ -60,13 +88,13 @@ export function TitleOverlay({
   onShowcaseChange,
   onToggleWind,
   onToggleMute,
+  onToggleRumble,
+  onTestRumble,
   onToggleTouchSticks,
   onStartFlight,
   onOpenPairing,
   onOpenChangelog,
 }: TitleOverlayProps) {
-  const [activeTab, setActiveTab] = useState<'missions' | 'texture' | 'settings'>('missions');
-
   useEffect(() => {
     onShowcaseChange?.(activeTab === 'texture');
     return () => {
@@ -90,7 +118,10 @@ export function TitleOverlay({
   const activeSkinOption = getDroneSkinOption(droneSkin);
 
   return (
-    <div className="fixed inset-0 z-20 flex flex-col justify-between gap-2 p-3 sm:p-5 lg:p-7 pointer-events-none">
+    <div
+      data-gamepad-root="title"
+      className="fixed inset-0 z-20 flex flex-col justify-between gap-2 p-3 sm:p-5 lg:p-7 pointer-events-none"
+    >
       {/* Subtle left scrim for guaranteed WCAG AA contrast over sunlit 3D world */}
       <div
         className="fixed inset-y-0 left-0 w-full md:w-[540px] pointer-events-none"
@@ -111,7 +142,10 @@ export function TitleOverlay({
 
       {/* Main Left-Third Lockup (flex-1 min-h-0 ensures zero overlap with bottom bar on short landscape phones) */}
       <div className="relative z-10 flex-1 min-h-0 flex items-center">
-        <div className="w-full max-w-[460px] max-h-full overflow-y-auto pr-1 flex flex-col gap-2 sm:gap-2.5 pointer-events-auto">
+        <div
+          data-gamepad-scroll="true"
+          className="w-full max-w-[460px] max-h-full overflow-y-auto pr-1 flex flex-col gap-2 sm:gap-2.5 pointer-events-auto"
+        >
         {/* Custom Inline SVG Quadcopter Title Emblem */}
         <div className="flex items-center gap-3">
           <svg
@@ -162,7 +196,7 @@ export function TitleOverlay({
             id="title-tab-missions"
             aria-selected={activeTab === 'missions'}
             aria-controls="title-panel-missions"
-            onClick={() => setActiveTab('missions')}
+            onClick={() => onChangeTab('missions')}
             className={`px-2 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === 'missions'
                 ? 'bg-amber-500 text-slate-950'
@@ -179,7 +213,7 @@ export function TitleOverlay({
             id="title-tab-texture"
             aria-selected={activeTab === 'texture'}
             aria-controls="title-panel-texture"
-            onClick={() => setActiveTab('texture')}
+            onClick={() => onChangeTab('texture')}
             className={`px-2 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === 'texture'
                 ? 'bg-amber-500 text-slate-950'
@@ -196,7 +230,7 @@ export function TitleOverlay({
             id="title-tab-settings"
             aria-selected={activeTab === 'settings'}
             aria-controls="title-panel-settings"
-            onClick={() => setActiveTab('settings')}
+            onClick={() => onChangeTab('settings')}
             className={`px-2 py-1.5 rounded-md text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
               activeTab === 'settings'
                 ? 'bg-amber-500 text-slate-950'
@@ -446,6 +480,35 @@ export function TitleOverlay({
               </span>
               <span className="font-mono">{muted ? 'MUDO' : 'ATIVADO'}</span>
             </button>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="title-toggle-rumble"
+                onClick={onToggleRumble}
+                className={`flex-1 px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
+                  rumbleEnabled
+                    ? 'bg-emerald-500/15 border-emerald-500/60 text-emerald-200'
+                    : 'bg-slate-900/85 border-slate-700 text-slate-400 hover:border-slate-500'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Vibrate className="w-4 h-4" aria-hidden="true" />
+                  Vibração do Controle
+                </span>
+                <span className="font-mono">{rumbleEnabled ? 'ATIVADA' : 'DESLIGADA'}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="title-test-rumble"
+                onClick={onTestRumble}
+                disabled={!rumbleEnabled}
+                title="Enviar pulso de vibração para o controle conectado"
+                className="px-3 py-2.5 rounded-lg border border-slate-700 bg-slate-900/85 hover:border-amber-400 disabled:opacity-45 disabled:cursor-not-allowed text-xs font-semibold text-amber-300 cursor-pointer whitespace-nowrap"
+              >
+                Testar
+              </button>
+            </div>
           </div>
         )}
 
@@ -477,24 +540,34 @@ export function TitleOverlay({
           </button>
         </div>
 
-        {/* Physical Xbox / DS4 Gamepad status indicator (sticks only, cable or Bluetooth) */}
+        {/* Physical Xbox / DS4 Gamepad status indicator (full menu + flight + haptics) */}
         <div
           data-testid="title-gamepad-status"
-          className={`flex items-center gap-2 text-[11px] px-3 py-1.5 rounded-lg border ${
+          className={`flex items-center justify-between gap-2 text-[11px] px-3 py-1.5 rounded-lg border transition-colors ${
             gamepadConnected
               ? 'bg-emerald-950/85 border-emerald-500/50 text-emerald-100'
               : 'bg-slate-950/80 border-slate-800 text-slate-300'
           }`}
         >
-          <Gamepad2
-            className={`w-3.5 h-3.5 shrink-0 ${gamepadConnected ? 'text-emerald-400' : 'text-slate-400'}`}
-            aria-hidden="true"
-          />
-          <span className="truncate">
-            {gamepadConnected
-              ? `Controle Conectado (${gamepadLabel || 'Xbox / DS4'}) · Apenas Sticks`
-              : 'Controle Xbox / PS4 (DS4) USB ou Bluetooth: mova um stick para ativar'}
-          </span>
+          <div className="flex items-center gap-2 min-w-0">
+            <Gamepad2
+              className={`w-3.5 h-3.5 shrink-0 ${gamepadConnected ? 'text-emerald-400' : 'text-slate-400'}`}
+              aria-hidden="true"
+            />
+            <span className="truncate">
+              {gamepadConnected
+                ? `${gamepadLabel || 'Controle Xbox / DS4'} · D-Pad/A/B Menus · Sticks Voo`
+                : 'Controle Xbox / PS4 (DS4): conecte e aperte um botão ou mova um stick'}
+            </span>
+          </div>
+          {gamepadFeedback && (
+            <span
+              data-testid="gamepad-feedback-pill"
+              className="shrink-0 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-[10px] font-mono text-amber-200"
+            >
+              {gamepadFeedback.label}
+            </span>
+          )}
         </div>
         </div>
       </div>
@@ -505,7 +578,21 @@ export function TitleOverlay({
           className="text-[11px] sm:text-xs text-slate-200 flex flex-wrap items-center gap-x-2 sm:gap-x-2.5 gap-y-1"
           style={{ textShadow: '0 1px 3px rgba(0, 0, 0, 0.95)' }}
         >
-          {touchSticksEnabled ? (
+          {gamepadConnected ? (
+            <>
+              <span>D-Pad/Stick Navegar</span>
+              <span aria-hidden="true">·</span>
+              <span>A / ✕ Selecionar</span>
+              <span aria-hidden="true">·</span>
+              <span>LB / RB Abas</span>
+              <span aria-hidden="true">·</span>
+              <span>Y / △ Iniciar Voo</span>
+              <span aria-hidden="true">·</span>
+              <span>X / □ Vento</span>
+              <span aria-hidden="true">·</span>
+              <span>B / ○ Voltar</span>
+            </>
+          ) : touchSticksEnabled ? (
             <>
               <span>Toque na tela para voar</span>
               <span aria-hidden="true">·</span>
@@ -523,7 +610,7 @@ export function TitleOverlay({
               <span aria-hidden="true">·</span>
               <span>W A S D / Setas Mover</span>
               <span aria-hidden="true">·</span>
-              <span>Sticks Xbox/DS4</span>
+              <span>Xbox/PS4 Completo</span>
               <span aria-hidden="true">·</span>
               <span>C Câmera</span>
               <span aria-hidden="true">·</span>

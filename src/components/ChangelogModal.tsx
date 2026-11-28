@@ -3,7 +3,7 @@
  * Apresenta a evolução detalhada do simulador por versão, com filtro entre recursos (V1.X)
  * e pequenas correções/ajustes (V1.X.Y).
  */
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Sparkles, Wrench, X } from 'lucide-react';
 import {
   CHANGELOG_ENTRIES,
@@ -14,6 +14,8 @@ import {
 } from '../sim/changelog';
 
 interface ChangelogModalProps {
+  filter: ChangelogFilter;
+  onChangeFilter: (filter: ChangelogFilter) => void;
   onClose: () => void;
 }
 
@@ -36,9 +38,7 @@ function getCategoryStyle(category: 'Novo' | 'Melhoria' | 'Correção'): string 
   return 'text-amber-300 bg-amber-500/15 border-amber-500/30';
 }
 
-export function ChangelogModal({ onClose }: ChangelogModalProps) {
-  const [filter, setFilter] = useState<ChangelogFilter>('all');
-
+export function ChangelogModal({ filter, onChangeFilter, onClose }: ChangelogModalProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === 'Escape') {
@@ -54,6 +54,7 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
 
   return (
     <div
+      data-gamepad-root="changelog"
       className="fixed inset-0 z-40 flex items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(6, 10, 18, 0.84)' }}
       role="dialog"
@@ -98,7 +99,9 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
               <button
                 key={opt.id}
                 type="button"
-                onClick={() => setFilter(opt.id)}
+                aria-pressed={active}
+                data-gamepad-default={active ? 'true' : undefined}
+                onClick={() => onChangeFilter(opt.id)}
                 className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
                   active
                     ? 'bg-amber-500 text-slate-950 border-amber-400'
@@ -112,7 +115,11 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
         </div>
 
         {/* Scrollable Release Timeline */}
-        <div className="flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col gap-3" data-testid="changelog-list">
+        <div
+          className="flex-1 min-h-0 overflow-y-auto pr-1 flex flex-col gap-3"
+          data-testid="changelog-list"
+          data-gamepad-scroll="true"
+        >
           {visibleEntries.map((entry) => {
             const isLatest = entry.version === GAME_VERSION;
             return (
@@ -158,10 +165,15 @@ export function ChangelogModal({ onClose }: ChangelogModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-800">
-          <span className="text-[11px] text-slate-400">
-            {visibleEntries.length} {visibleEntries.length === 1 ? 'versão exibida' : 'versões exibidas'}
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[11px] text-slate-400">
+              {visibleEntries.length} {visibleEntries.length === 1 ? 'versão exibida' : 'versões exibidas'}
+            </span>
+            <span className="text-[10px] text-slate-500">
+              Controle: LB/RB Filtrar · Stick Dir. Rolar · A/✕ Selecionar · B/○ Fechar
+            </span>
+          </div>
           <button
             type="button"
             onClick={onClose}

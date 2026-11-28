@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   Play,
   RotateCcw,
@@ -16,13 +15,19 @@ import {
   Eye,
   EyeOff,
   Touchpad,
+  Vibrate,
   Volume2,
   VolumeX,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { MISSIONS, getMissionById } from '../sim/missions';
 import { GRAPHICS_MODE_OPTIONS, getGraphicsModeOption } from '../sim/graphicsMode';
 import { DroneSkinSelector } from './DroneSkinSelector';
+import type { GamepadActionFeedback } from '../hooks/useGamepadUI';
 import type { CameraMode, DronePhysicsState, DroneSkinId, FlightMode, GraphicsMode, MissionId, MissionProgress, SpeedUnit } from '../sim/types';
+
+export type PauseTabId = 'flight' | 'texture' | 'settings';
 
 interface PauseModalProps {
   missionId: MissionId;
@@ -33,11 +38,15 @@ interface PauseModalProps {
   graphicsMode: GraphicsMode;
   windEnabled: boolean;
   muted: boolean;
+  rumbleEnabled?: boolean;
   touchSticksEnabled: boolean;
   hudHidden: boolean;
   controllerConnected: boolean;
   gamepadConnected?: boolean;
   gamepadLabel?: string;
+  gamepadFeedback?: GamepadActionFeedback | null;
+  pauseTab: PauseTabId;
+  onChangePauseTab: (tab: PauseTabId) => void;
   onResume: () => void;
   onRestart: () => void;
   onReturnTitle: () => void;
@@ -49,6 +58,8 @@ interface PauseModalProps {
   onSelectGraphicsMode: (mode: GraphicsMode) => void;
   onToggleWind: () => void;
   onToggleMute: () => void;
+  onToggleRumble?: () => void;
+  onTestRumble?: () => void;
   onToggleTouchSticks: () => void;
   onToggleHud: () => void;
   onOpenPairing: () => void;
@@ -63,11 +74,15 @@ export function PauseModal({
   graphicsMode,
   windEnabled,
   muted,
+  rumbleEnabled = true,
   touchSticksEnabled,
   hudHidden,
   controllerConnected,
   gamepadConnected = false,
   gamepadLabel,
+  gamepadFeedback,
+  pauseTab,
+  onChangePauseTab,
   onResume,
   onRestart,
   onReturnTitle,
@@ -79,14 +94,20 @@ export function PauseModal({
   onSelectGraphicsMode,
   onToggleWind,
   onToggleMute,
+  onToggleRumble,
+  onTestRumble,
   onToggleTouchSticks,
   onToggleHud,
   onOpenPairing,
 }: PauseModalProps) {
-  const [pauseTab, setPauseTab] = useState<'flight' | 'texture' | 'settings'>('flight');
+  const missionIndex = Math.max(0, MISSIONS.findIndex((m) => m.id === missionId));
+  const activeMission = MISSIONS[missionIndex] ?? MISSIONS[0];
+  const prevMission = MISSIONS[(missionIndex - 1 + MISSIONS.length) % MISSIONS.length];
+  const nextMission = MISSIONS[(missionIndex + 1) % MISSIONS.length];
 
   return (
     <div
+      data-gamepad-root="pause"
       className="fixed inset-0 z-30 flex items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(6, 10, 18, 0.78)' }}
       role="dialog"
@@ -94,6 +115,7 @@ export function PauseModal({
       aria-labelledby="pause-title"
     >
       <div
+        data-gamepad-scroll="true"
         className="w-full max-w-lg max-h-[92vh] overflow-y-auto rounded-xl border border-slate-700 p-6 text-slate-100 flex flex-col gap-4"
         style={{ backgroundColor: 'rgba(12, 18, 32, 0.96)' }}
       >
@@ -126,7 +148,7 @@ export function PauseModal({
             type="button"
             role="tab"
             aria-selected={pauseTab === 'flight'}
-            onClick={() => setPauseTab('flight')}
+            onClick={() => onChangePauseTab('flight')}
             className={`px-2 py-2 rounded-md text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
               pauseTab === 'flight'
                 ? 'bg-amber-500 text-slate-950'
@@ -140,7 +162,7 @@ export function PauseModal({
             type="button"
             role="tab"
             aria-selected={pauseTab === 'texture'}
-            onClick={() => setPauseTab('texture')}
+            onClick={() => onChangePauseTab('texture')}
             className={`px-2 py-2 rounded-md text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
               pauseTab === 'texture'
                 ? 'bg-amber-500 text-slate-950'
@@ -154,7 +176,7 @@ export function PauseModal({
             type="button"
             role="tab"
             aria-selected={pauseTab === 'settings'}
-            onClick={() => setPauseTab('settings')}
+            onClick={() => onChangePauseTab('settings')}
             className={`px-2 py-2 rounded-md text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap ${
               pauseTab === 'settings'
                 ? 'bg-amber-500 text-slate-950'
@@ -169,31 +191,55 @@ export function PauseModal({
         {pauseTab === 'flight' ? (
           <>
             {gamepadConnected && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-xs text-emerald-200">
-                <Gamepad2 className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
-                <span>
-                  Controle conectado ({gamepadLabel || 'Xbox / DS4'}) · Stick Esq: Acel/Yaw · Stick Dir: Pitch/Roll
-                </span>
+              <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-emerald-500/40 bg-emerald-500/15 text-xs text-emerald-200">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Gamepad2 className="w-4 h-4 text-emerald-400 shrink-0" aria-hidden="true" />
+                  <span className="truncate">
+                    {gamepadLabel || 'Controle Xbox / DS4'} · D-Pad Menus · Stick Voo
+                  </span>
+                </div>
+                {gamepadFeedback && (
+                  <span className="shrink-0 px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-[10px] font-mono text-amber-200">
+                    {gamepadFeedback.label}
+                  </span>
+                )}
               </div>
             )}
 
-            {/* Mission Switch */}
+            {/* Mission Switch (controller-friendly stepper) */}
             <div>
-              <label htmlFor="pause-mission-select" className="block text-xs font-medium text-slate-300 mb-1.5">
-                Missão Ativa
-              </label>
-              <select
-                id="pause-mission-select"
-                value={missionId}
-                onChange={(e) => onSelectMission(e.target.value as MissionId)}
-                className="w-full px-3 py-2.5 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-amber-400"
-              >
-                {MISSIONS.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.code}. {m.title} — {m.subtitle}
-                  </option>
-                ))}
-              </select>
+              <span className="block text-xs font-medium text-slate-300 mb-1.5">
+                Missão Ativa ({missionIndex + 1}/{MISSIONS.length})
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  data-testid="pause-mission-prev"
+                  aria-label="Missão anterior"
+                  onClick={() => onSelectMission(prevMission.id)}
+                  className="w-10 h-10 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center shrink-0 cursor-pointer"
+                >
+                  <ChevronLeft className="w-4 h-4" aria-hidden="true" />
+                </button>
+                <div
+                  data-testid="pause-mission-current"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-slate-900 border border-slate-700 text-left"
+                >
+                  <div className="text-xs sm:text-sm font-semibold text-white truncate">
+                    {activeMission.code}. {activeMission.title}
+                  </div>
+                  <div className="text-[11px] text-slate-400 truncate">{activeMission.subtitle}</div>
+                </div>
+                <button
+                  type="button"
+                  data-testid="pause-mission-next"
+                  aria-label="Próxima missão"
+                  onClick={() => onSelectMission(nextMission.id)}
+                  className="w-10 h-10 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 flex items-center justify-center shrink-0 cursor-pointer"
+                >
+                  <ChevronRight className="w-4 h-4" aria-hidden="true" />
+                </button>
+              </div>
             </div>
 
             {/* Flight Mode & Camera */}
@@ -414,6 +460,34 @@ export function PauseModal({
               </span>
               <span className="font-mono">{muted ? 'MUDO' : 'ATIVADO'}</span>
             </button>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="pause-toggle-rumble"
+                onClick={onToggleRumble}
+                className={`flex-1 px-3.5 py-2.5 rounded-lg border text-xs font-medium flex items-center justify-between cursor-pointer ${
+                  rumbleEnabled
+                    ? 'bg-emerald-500/15 border-emerald-500/60 text-emerald-200'
+                    : 'bg-slate-900 border-slate-700 text-slate-400 hover:border-slate-500'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <Vibrate className="w-4 h-4" aria-hidden="true" />
+                  Vibração do Controle
+                </span>
+                <span className="font-mono">{rumbleEnabled ? 'ATIVADA' : 'DESLIGADA'}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="pause-test-rumble"
+                onClick={onTestRumble}
+                disabled={!rumbleEnabled}
+                className="px-3 py-2.5 rounded-lg border border-slate-700 bg-slate-900 hover:border-amber-400 disabled:opacity-45 disabled:cursor-not-allowed text-xs font-semibold text-amber-300 cursor-pointer whitespace-nowrap"
+              >
+                Testar
+              </button>
+            </div>
           </div>
         )}
 
@@ -438,6 +512,7 @@ export function PauseModal({
             </button>
             <button
               type="button"
+              data-gamepad-default="true"
               onClick={onResume}
               className="px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
             >
@@ -445,6 +520,9 @@ export function PauseModal({
               Continuar Voo
             </button>
           </div>
+        </div>
+        <div className="text-[10px] text-slate-400 text-center">
+          Controle: D-Pad Navegar · A/✕ Selecionar · LB/RB Abas · B/○ ou Start Continuar
         </div>
       </div>
     </div>
@@ -475,6 +553,7 @@ export function OutcomeModal({
 
   return (
     <div
+      data-gamepad-root="outcome"
       className="fixed inset-0 z-30 flex items-center justify-center p-4"
       style={{ backgroundColor: 'rgba(6, 10, 18, 0.8)' }}
       role="dialog"
@@ -537,6 +616,7 @@ export function OutcomeModal({
         <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
           <button
             type="button"
+            data-gamepad-action="return-title"
             onClick={onReturnTitle}
             className="px-3.5 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-medium text-slate-300 cursor-pointer"
           >
@@ -546,6 +626,7 @@ export function OutcomeModal({
             <button
               type="button"
               data-start={!victory || !hasNextMission ? 'true' : undefined}
+              data-gamepad-default={!victory || !hasNextMission ? 'true' : undefined}
               onClick={onRetry}
               className={`px-4 py-2.5 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
                 victory && hasNextMission
@@ -561,6 +642,7 @@ export function OutcomeModal({
               <button
                 type="button"
                 data-start="true"
+                data-gamepad-default="true"
                 onClick={onNextMission}
                 className="px-5 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
               >
@@ -569,6 +651,9 @@ export function OutcomeModal({
               </button>
             )}
           </div>
+        </div>
+        <div className="text-[10px] text-slate-400 text-center">
+          Controle: D-Pad Navegar · A/✕ Confirmar · B/○ Menu Inicial
         </div>
       </div>
     </div>

@@ -16,12 +16,16 @@ import { STRUCTURE_SLAB_ELEVATION, buildWorldStructures, isPointNearStructureBox
 import { MISSIONS, getMissionById, createInitialMissionProgress, evaluateMissionStep } from './missions';
 import { computeFloatingStickOrigin, computeFloatingStickValue } from './floatingStick';
 import {
+  GAMEPAD_BUTTONS,
   STICK_DEADZONE,
+  computeRumbleParams,
   formatGamepadLabel,
+  mapGamepadToButtonsSnapshot,
   mapStandardGamepadToSticks,
   pickPrimaryGamepad,
   rescaleStickAxis,
 } from './gamepad';
+import { pickNextRectIndex, type NavRect } from './gamepadNav';
 import { CRASH_ANIMATION_DURATION_SEC, initCrashTumble, stepCrashTumble } from './crashAnimation';
 import {
   CHANGELOG_ENTRIES,
@@ -58,6 +62,7 @@ import {
 } from './touchControls';
 import { DEFAULT_SPEED_UNIT, formatSpeed, isValidSpeedUnit } from './speedUnit';
 import { getLoadingCopy } from './loadingState';
+import { createTurbineSpinnerGeometry } from './worldBuilder';
 import type { PhysicsConfig, StickInput } from './types';
 
 const neutralInput: StickInput = { throttle: 0, yaw: 0, pitch: 0, roll: 0 };
@@ -782,7 +787,7 @@ test('touch controls default detection, stick radius clamping, and portrait FOV 
   assert.equal(computeAdaptiveVerticalFov(62, 1.0), 62);
   const portraitFov = computeAdaptiveVerticalFov(62, 390 / 844);
   assert.ok(portraitFov > 75 && portraitFov <= 98, `Expected portrait FOV boost, got ${portraitFov}`);
-  assert.equal(GAME_VERSION, 'V2.2');
+  assert.equal(GAME_VERSION, 'V2.3');
 });
 
 test('speed unit helper converts between m/s and km/h cleanly and propagates in telemetry', () => {
@@ -803,14 +808,14 @@ test('speed unit helper converts between m/s and km/h cleanly and propagates in 
   assert.equal(telemMs.speedUnit, 'ms');
 });
 
-test('graphics mode options support Low-Poly (Antiga) and Realista (Atual) with strict validation', () => {
+test('graphics mode options support Low-Poly (Clássica) and Realista (Nova) with strict validation', () => {
   assert.equal(DEFAULT_GRAPHICS_MODE, 'realistic');
   assert.equal(GRAPHICS_MODE_OPTIONS.length, 2);
   assert.equal(isValidGraphicsMode('low_poly'), true);
   assert.equal(isValidGraphicsMode('realistic'), true);
   assert.equal(isValidGraphicsMode('ultra'), false);
-  assert.equal(getGraphicsModeOption('low_poly').label, 'Low-Poly (Antiga)');
-  assert.equal(getGraphicsModeOption('realistic').label, 'Realista (Atual)');
+  assert.equal(getGraphicsModeOption('low_poly').label, 'Low-Poly (Clássica)');
+  assert.equal(getGraphicsModeOption('realistic').label, 'Realista (Nova)');
 });
 
 test('loading overlay copy provides localized Portuguese messages for all transition kinds', () => {
@@ -826,7 +831,103 @@ test('loading overlay copy provides localized Portuguese messages for all transi
   assert.equal(skin.badge, 'TEXTURA DO DRONE');
   assert.ok(skin.subtitle.includes('Drone Branco Moderno'));
 
-  const graphics = getLoadingCopy('graphics', 'Low-Poly (Antiga)');
+  const graphics = getLoadingCopy('graphics', 'Low-Poly (Clássica)');
   assert.equal(graphics.badge, 'GRÁFICOS DO JOGO');
-  assert.ok(graphics.subtitle.includes('Low-Poly (Antiga)'));
+  assert.ok(graphics.subtitle.includes('Low-Poly (Clássica)'));
 });
+
+test('wind turbine spinner cone has outward and forward-facing normals (never inside-out)', () => {
+  const geo = createTurbineSpinnerGeometry();
+  const pos = geo.attributes.position;
+  const norm = geo.attributes.normal;
+  assert.ok(pos.count > 100);
+
+  let forwardZSum = 0;
+  for (let i = 0; i < pos.count; i++) {
+    const nx = norm.getX(i);
+    const ny = norm.getY(i);
+    const nz = norm.getZ(i);
+    const len = Math.hypot(nx, ny, nz);
+    assert.ok(len > 0.9, `Expected unit normal at vertex ${i}, got length ${len}`);
+
+    const px = pos.getX(i);
+    const py = pos.getY(i);
+    const pz = pos.getZ(i);
+    if (pz > 0.05) {
+      const outwardDot = px * nx + py * ny + (pz - 0.1) * nz;
+      assert.ok(outwardDot > 0.5, `Expected outward normal on spinner shell at vertex ${i}, got ${outwardDot}`);
+      forwardZSum += nz;
+    }
+  }
+  assert.ok(forwardZSum > 50, `Expected net forward (+Z) normals on spinner tip, got ${forwardZSum}`);
+  geo.dispose();
+});
+
+test('gamepad button snapshot maps standard Xbox/DS4 inputs and haptic presets accurately', () => {
+  const empty = mapGamepadToButtonsSnapshot(null);
+  assert.equal(empty.connected, false);
+  assert.equal(empty.a, false);
+
+  const buttons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
+  buttons[GAMEPAD_BUTTONS.A] = { pressed: true, value: 1 };
+  buttons[GAMEPAD_BUTTONS.LB] = { pressed: true, value: 1 };
+  buttons[GAMEPAD_BUTTONS.START] = { pressed: true, value: 1 };
+  buttons[GAMEPAD_BUTTONS.DPAD_DOWN] = { pressed: true, value: 1 };
+
+  const snap = mapGamepadToButtonsSnapshot({
+    id: 'Xbox 360 Controller (STANDARD GAMEPAD Vendor: 045e Product: 028e)',
+    connected: true,
+    mapping: 'standard',
+    axes: [0.85, 0, 0, -0.75],
+    buttons,
+  });
+
+  assert.equal(snap.connected, true);
+  assert.equal(snap.a, true);
+  assert.equal(snap.b, false);
+  assert.equal(snap.lb, true);
+  assert.equal(snap.start, true);
+  assert.equal(snap.down, true);
+  assert.equal(snap.right, true); // Left stick X > 0.52
+  assert.ok(snap.rightStickY < -0.5);
+
+  const navRumble = computeRumbleParams('nav');
+  const crashRumble = computeRumbleParams('crash');
+  assert.ok(crashRumble.durationMs > navRumble.durationMs);
+  assert.ok(crashRumble.strongMagnitude > navRumble.strongMagnitude);
+  assert.ok(computeRumbleParams('gate').weakMagnitude > 0.4);
+});
+
+test('2D spatial gamepad navigation moves accurately between tabs, rows, and columns', () => {
+  // Layout: Row 0 = 3 tabs [0, 1, 2]; Row 1 = full-width mission [3]; Row 2 = 2 side-by-side buttons [4, 5]
+  const rects: NavRect[] = [
+    { left: 20, top: 20, width: 100, height: 32 }, // 0: Tab 1
+    { left: 126, top: 20, width: 100, height: 32 }, // 1: Tab 2
+    { left: 232, top: 20, width: 100, height: 32 }, // 2: Tab 3
+    { left: 20, top: 70, width: 312, height: 42 }, // 3: Mission item
+    { left: 20, top: 130, width: 150, height: 38 }, // 4: Mode GPS
+    { left: 182, top: 130, width: 150, height: 38 }, // 5: Mode Sport
+  ];
+
+  assert.equal(pickNextRectIndex(rects, 0, 'right'), 1);
+  assert.equal(pickNextRectIndex(rects, 1, 'right'), 2);
+  assert.equal(pickNextRectIndex(rects, 2, 'right'), 2); // edge holds
+  assert.equal(pickNextRectIndex(rects, 1, 'left'), 0);
+  assert.equal(pickNextRectIndex(rects, 1, 'down'), 3);
+  assert.equal(pickNextRectIndex(rects, 3, 'down'), 4);
+  assert.equal(pickNextRectIndex(rects, 4, 'right'), 5);
+  assert.equal(pickNextRectIndex(rects, 5, 'left'), 4);
+  assert.equal(pickNextRectIndex(rects, 5, 'up'), 3);
+});
+
+test('V2.3 changelog documents controller navigation and haptics without mentioning graphics label rename', () => {
+  const v23 = CHANGELOG_ENTRIES[0];
+  assert.equal(v23.version, 'V2.3');
+  assert.equal(v23.kind, 'feature');
+  const fullText = `${v23.title} ${v23.summary} ${v23.changes.map((c) => c.text).join(' ')}`;
+  assert.ok(fullText.includes('DS4Windows'));
+  assert.ok(fullText.includes('Vibração') || fullText.includes('vibração'));
+  assert.equal(fullText.includes('Clássica'), false);
+  assert.equal(fullText.includes('Realista (Nova)'), false);
+});
+
